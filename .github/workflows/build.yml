@@ -46,24 +46,15 @@ jobs:
 
       - name: Override app icons
         run: |
-          mkdir -p android/app/src/main/res/mipmap-mdpi
-          mkdir -p android/app/src/main/res/mipmap-hdpi
-          mkdir -p android/app/src/main/res/mipmap-xhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          for dir in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p android/app/src/main/res/mipmap-${dir}
+            cp ic_launcher.png android/app/src/main/res/mipmap-${dir}/ic_launcher.png
+            cp ic_launcher.png android/app/src/main/res/mipmap-${dir}/ic_launcher_round.png
+            cp ic_launcher_adaptive_back.png android/app/src/main/res/mipmap-${dir}/ic_launcher_adaptive_back.png
+            cp ic_launcher_adaptive_fore.png android/app/src/main/res/mipmap-${dir}/ic_launcher_adaptive_fore.png
+          done
           mkdir -p android/app/src/main/res/mipmap-anydpi-v26
-          cp ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-          cp ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          cp ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          cp ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-          cp ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          cp ic_launcher_adaptive_back.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_adaptive_back.png
-          cp ic_launcher_adaptive_fore.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_adaptive_fore.png
-          cp 1024.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
-          cp 1024.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
-          cp 1024.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
-          cp 1024.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-          cp 1024.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          cp ic_launcher.png android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.png
 
       - name: Set app name to NEW YOU
         run: |
