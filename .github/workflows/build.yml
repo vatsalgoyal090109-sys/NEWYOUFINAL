@@ -78,7 +78,7 @@ jobs:
           cd android
           ./gradlew assembleDebug --no-daemon
 
-      - - name: Rename APK
+      - name: Rename APK
         run: |
           find android/app/build/outputs/apk/debug/ -name "*.apk" -exec mv {} android/app/build/outputs/apk/debug/newyou.apk \;
       - name: Upload APK
