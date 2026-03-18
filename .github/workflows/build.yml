@@ -53,8 +53,8 @@ jobs:
             cp ic_launcher_adaptive_back.png android/app/src/main/res/mipmap-${dir}/ic_launcher_adaptive_back.png
             cp ic_launcher_adaptive_fore.png android/app/src/main/res/mipmap-${dir}/ic_launcher_adaptive_fore.png
           done
-          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
-          cp ic_launcher.png android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.png
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
       - name: Set app name to NEW YOU
         run: |
