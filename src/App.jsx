@@ -10968,58 +10968,64 @@ export default function App() {
 
     // Daily reset check + penalty for uncompleted quests
   useEffect(() => {
-    // Apply penalties for any uncompleted daily quests from yesterday (not already manually failed)
-    const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
-    const today = todayStr();
-    state.quests.daily.forEach(q => {
-      // Only auto-penalise quests that were never touched (not completed, not manually failed)
-      if (!q.completed && !q.failed && !q.timedOut && q.date !== today && (state.lastResetDate || '') !== today) {
-        if (state.lastResetDate && state.lastResetDate < today) {
-          dispatch({ type:'APPLY_PENALTY', payload:{ xp: q.xp, reason: `Failed daily: ${q.name}` } });
-        }
-      }
-    });
-    dispatch({ type:'RESET_DAILY' });
+    const runDailyReset = () => {
+      const today = todayStr();
+      // Only reset if we haven't reset today yet
+      if ((state.lastResetDate || '') === today) return;
 
-    // Weekly: penalise uncompleted weekly quests on reset day (Sunday)
-    const day = new Date().getDay();
-    if (day === 0) {
-      const currentWeek = getWeekId();
-      if ((state.lastResetWeek || '') !== currentWeek) {
-        state.quests.weekly.forEach(q => {
-          if (!q.completed && !q.failed) {
-            dispatch({ type:'APPLY_PENALTY', payload:{ xp: q.xp, reason: `Failed weekly: ${q.name}` } });
+      // Apply penalties for any uncompleted daily quests from yesterday
+      state.quests.daily.forEach(q => {
+        if (!q.completed && !q.failed && !q.timedOut) {
+          if (state.lastResetDate && state.lastResetDate < today) {
+            dispatch({ type:'APPLY_PENALTY', payload:{ xp: q.xp, reason: `Failed daily: ${q.name}` } });
           }
-        });
-      }
-      dispatch({ type:'RESET_WEEKLY' });
-    }
+        }
+      });
+      dispatch({ type:'RESET_DAILY' });
 
-    // Schedule midnight auto-reset + penalty
+      // Weekly: penalise uncompleted weekly quests on reset day (Sunday)
+      const day = new Date().getDay();
+      if (day === 0) {
+        const currentWeek = getWeekId();
+        if ((state.lastResetWeek || '') !== currentWeek) {
+          state.quests.weekly.forEach(q => {
+            if (!q.completed && !q.failed) {
+              dispatch({ type:'APPLY_PENALTY', payload:{ xp: q.xp, reason: `Failed weekly: ${q.name}` } });
+            }
+          });
+        }
+        dispatch({ type:'RESET_WEEKLY' });
+      }
+    };
+
+    // Run immediately on mount
+    runDailyReset();
+
+    // Schedule midnight auto-reset
     const now = new Date();
     const midnight = new Date(); midnight.setHours(24,0,0,0);
     const msToMidnight = midnight - now;
     const t = setTimeout(() => {
-      // Penalise only quests not already manually failed
-      state.quests.daily.forEach(q => {
-        if (!q.completed && !q.failed && !q.timedOut) {
-          dispatch({ type:'APPLY_PENALTY', payload:{ xp: q.xp, reason: `Failed daily: ${q.name}` } });
-        }
-      });
-      dispatch({ type:'RESET_DAILY' });
-      // Weekly penalty+reset at Sunday midnight
-      const newDay = new Date().getDay();
-      if (newDay === 0) {
-        state.quests.weekly.forEach(q => {
-          if (!q.completed && !q.failed) {
-            dispatch({ type:'APPLY_PENALTY', payload:{ xp: q.xp, reason: `Failed weekly: ${q.name}` } });
-          }
-        });
-        dispatch({ type:'RESET_WEEKLY' });
-      }
+      runDailyReset();
     }, msToMidnight);
-    return () => clearTimeout(t);
-  }, []);
+
+    // Also run when app comes back to foreground (handles closed app overnight)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        runDailyReset();
+      }
+    };
+    const handleFocus = () => runDailyReset();
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [state.lastResetDate]); // Re-run when date changes
 
   // Schedule notification
   useEffect(() => {
