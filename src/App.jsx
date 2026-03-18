@@ -10,6 +10,7 @@ import {
 // ─── STYLES ─────────────────────────────────────────────────────────────────
 const STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -28,7 +29,7 @@ const STYLES = `
   --text-dim: #6a7a9a;
 }
 
-body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font-family: 'Courier New', 'Noto Color Emoji', 'Segoe UI Emoji', 'Apple Color Emoji', monospace; overflow: hidden; }
 
 
 @keyframes typingDot {
@@ -95,13 +96,22 @@ body { background: var(--bg); color: var(--text); font-family: 'Courier New', mo
   color: var(--text);
   border-radius: 6px;
   padding: 10px 14px;
-  font-family: 'Courier New', monospace;
+  font-family: 'Courier New', 'Noto Color Emoji', 'Segoe UI Emoji', 'Apple Color Emoji', monospace;
   font-size: 14px;
   outline: none;
   transition: border-color 0.2s;
   width: 100%;
 }
 .input-dark:focus { border-color: var(--mana); box-shadow: 0 0 10px rgba(79,195,247,0.2); }
+
+/* Ensure emoji render everywhere */
+input, textarea, select, button, span, div {
+  font-variant-emoji: text;
+}
+input[type="text"], input[type="number"], input[type="search"], textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
 
 .scrollable { overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(79,195,247,0.3) transparent; }
 
