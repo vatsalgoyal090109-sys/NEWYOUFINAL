@@ -806,7 +806,7 @@ const PENALTY_SFX_B64 = "data:audio/mp3;base64,SUQzBAAAAAABDFRQRTEAAAARAAADRXh0c
 
 // ─── INITIAL STATE ────────────────────────────────────────────────────────────
 const buildInitialState = () => ({
-  hunter: { name:"", class:"", rank:"E", level:1, totalXP:0, xpToNextLevel:1000, title:"The Weakest", createdAt:null, coins:0, equippedTitle:null, equippedBadge:null, boostMult:1, boostEnd:null, hp:100, maxHp:100 },
+  hunter: { name:"", class:"", rank:"E", level:1, totalXP:0, xpToNextLevel:1000, title:"The Weakest", createdAt:null, coins:0, attackPoints:0, dungeonKeys:0, equippedTitle:null, equippedBadge:null, boostMult:1, boostEnd:null, hp:100, maxHp:100 },
   stats: { strength:1, intelligence:1, discipline:1, vitality:1, focus:1, charisma:1 },
   customStats: DEFAULT_CUSTOM_STATS,
   personalQuotes: [],
@@ -850,6 +850,7 @@ const buildInitialState = () => ({
   reflections: [],
   oath: { text:'', lockedAt:null, completed:false },
   bossDefeated: [],
+  customBosses: [],
   bossDungeon: {},
   activityLog: [],
   lastActivity: null,
@@ -982,30 +983,28 @@ function reducer(state, action) {
         }
       }
 
-      // Handle rank change: carry AP forward to new rank dungeon + grant 100 bonus AP
+      // Handle rank change: grant 100 bonus AP on rank up
       let newBossDungeon = state.bossDungeon || {};
       if (rankChanged && BOSS_DATA[newRank]) {
-        const oldDungeon = newBossDungeon[rank] || {};
-        const carriedAP = oldDungeon.attackPoints || 0;
         const existingNewDungeon = newBossDungeon[newRank] || {
           hp: BOSS_DATA[newRank].maxHp,
           attackPoints: 0,
           phase: 'locked',
           playerHp: 100,
         };
-        const bonusAP = 100;
         newBossDungeon = {
           ...newBossDungeon,
-          [newRank]: {
-            ...existingNewDungeon,
-            attackPoints: Math.round((existingNewDungeon.attackPoints + carriedAP + bonusAP) * 10) / 10,
-          },
+          [newRank]: { ...existingNewDungeon },
         };
       }
 
+      const newAttackPoints = rankChanged
+        ? Math.round(((state.hunter.attackPoints||0) + 100) * 10) / 10
+        : (state.hunter.attackPoints||0);
+
       return {
         ...state,
-        hunter: { ...state.hunter, totalXP, level, xpToNextLevel, rank:newRank, title, coins:newCoins, boostMult:newBoostMult, boostEnd:newBoostEnd,
+        hunter: { ...state.hunter, totalXP, level, xpToNextLevel, rank:newRank, title, coins:newCoins, attackPoints:newAttackPoints, boostMult:newBoostMult, boostEnd:newBoostEnd,
           maxHp: RANK_MAX_HP[newRank] || 100,
           hp: rankChanged ? RANK_MAX_HP[newRank] : (state.hunter.hp ?? state.hunter.maxHp ?? 100),
         },
@@ -1016,7 +1015,9 @@ function reducer(state, action) {
     case 'PURCHASE_REWARD': {
       const { id, cost, item } = action.payload;
       if ((state.hunter.coins||0) < cost) return state;
-      const collectionEntry = item ? { ...item, acquiredAt: Date.now(), source: 'purchase' } : null;
+      // Potions are handled separately via ADD_TO_COLLECTION — don't double-add
+      const skipCollection = item?.type === 'Potion';
+      const collectionEntry = (!skipCollection && item) ? { ...item, acquiredAt: Date.now(), source: 'purchase' } : null;
       return { ...state,
         hunter: { ...state.hunter, coins: (state.hunter.coins||0) - cost },
         ownedRewards: [...(state.ownedRewards||[]), id],
@@ -1036,6 +1037,24 @@ function reducer(state, action) {
       if (!reward) return state;
       const entry = { ...reward, acquiredAt: Date.now(), source: 'quest_reward' };
       return { ...state, collection: [...(state.collection||[]), entry] };
+    }
+    case 'ADD_TO_COLLECTION': {
+      return { ...state, collection: [...(state.collection||[]), action.payload] };
+    }
+    case 'CONSUME_POTION': {
+      // action.payload = unique collection item id — only this exact entry is consumed
+      const item = (state.collection||[]).find(i => i.id === action.payload);
+      if (!item || item.consumed) return state;
+      const maxHp = state.hunter.maxHp || RANK_MAX_HP[state.hunter.rank] || 100;
+      const currentHp = state.hunter.hp ?? maxHp;
+      const healAmt = item.hpGrant === 'full' ? maxHp : (item.hpGrant || 0);
+      const newHp = Math.min(maxHp, currentHp + healAmt);
+      return {
+        ...state,
+        hunter: { ...state.hunter, hp: newHp },
+        // Only mark THIS specific item consumed — match by unique id only
+        collection: (state.collection||[]).map(i => i.id === action.payload ? { ...i, consumed: true, consumedAt: Date.now() } : i)
+      };
     }
     case 'REDEEM_CUSTOM_REWARD': {
       const { rewardId } = action.payload;
@@ -1220,11 +1239,7 @@ function reducer(state, action) {
       } else if (item.effect === 'xp_double') {
         ns = { ...ns, hunter: { ...ns.hunter, boostMult:2, boostEnd: Date.now() + (item.value||24)*3600000 } };
       } else if (item.effect === 'borrow_ap') {
-        const rank = ns.hunter.rank;
-        const dungeon = ns.bossDungeon || {};
-        const entry = dungeon[rank] || { hp: BOSS_DATA[rank]?.maxHp||0, attackPoints:0, phase:'locked', playerHp:100 };
-        ns = { ...ns, bossDungeon: { ...dungeon, [rank]: { ...entry, attackPoints: (entry.attackPoints||0) + (item.value||500) } } };
-        // Add corresponding debt
+        ns = { ...ns, hunter: { ...ns.hunter, attackPoints: Math.round(((ns.hunter.attackPoints||0) + (item.value||500)) * 10) / 10 } };
         ns = { ...ns, debtLedger: [...(ns.debtLedger||[]), { id:'debt_bm_'+Date.now(), description:'Borrowed '+item.value+' AP from Black Market', originalXP:300, currentXP:300, createdAt:Date.now(), cleared:false }] };
       }
       return ns;
@@ -1348,65 +1363,94 @@ function reducer(state, action) {
         activityLog: [{ id:Date.now()+'_boss', ts:Date.now(), ...actB }, ...(state.activityLog||[]).slice(0,499)] };
     }
     case 'EARN_ATTACK_POINTS': {
-      const { rank, amount } = action.payload;
-      if (!rank || !BOSS_DATA[rank]) return state;
+      const { amount } = action.payload;
+      const current = state.hunter.attackPoints || 0;
+      return { ...state, hunter: { ...state.hunter, attackPoints: Math.round((current + amount) * 10) / 10 } };
+    }
+    case 'GAIN_DUNGEON_KEY': {
+      return { ...state, hunter: { ...state.hunter, dungeonKeys: (state.hunter.dungeonKeys||0) + 1 } };
+    }
+    case 'USE_DUNGEON_KEY': {
+      // action.payload = custom boss key ('custom_abc123')
+      const keys = state.hunter.dungeonKeys || 0;
+      if (keys <= 0) return state;
       const dungeon = state.bossDungeon || {};
-      const existing = dungeon[rank] || { hp: BOSS_DATA[rank].maxHp, attackPoints: 0, phase: 'locked', playerHp: 100 };
-      if (existing.phase === 'defeated') return state;
+      const customBoss = (state.customBosses||[]).find(b => 'custom_'+b.id === action.payload);
+      if (!customBoss) return state;
+      const existing = dungeon[action.payload] || { hp: customBoss.maxHp, attackPoints: 0, phase: 'locked', playerHp: 100 };
+      if (existing.phase !== 'locked') return state; // already unlocked
       return {
         ...state,
-        bossDungeon: {
-          ...dungeon,
-          [rank]: { ...existing, attackPoints: Math.round((existing.attackPoints + amount) * 10) / 10 }
-        }
+        hunter: { ...state.hunter, dungeonKeys: keys - 1 },
+        bossDungeon: { ...dungeon, [action.payload]: { ...existing, hp: existing.hp || customBoss.maxHp, phase: 'unlocked' } }
       };
+    }
+    case 'ADD_CUSTOM_BOSS': {
+      const boss = { id: 'cb_'+Date.now(), ...action.payload, createdAt: Date.now() };
+      const key = 'custom_'+boss.id;
+      const dungeon = state.bossDungeon || {};
+      // Always locked — requires a Dungeon Key to unlock
+      const newDungeonEntry = { hp: boss.maxHp, attackPoints: 0, phase: 'locked', playerHp: 100 };
+      return {
+        ...state,
+        customBosses: [...(state.customBosses||[]), boss],
+        bossDungeon: { ...dungeon, [key]: newDungeonEntry }
+      };
+    }
+    case 'DELETE_CUSTOM_BOSS': {
+      const dungeon = { ...state.bossDungeon || {} };
+      delete dungeon['custom_'+action.payload];
+      return { ...state, customBosses: (state.customBosses||[]).filter(b=>b.id!==action.payload), bossDungeon: dungeon };
     }
     case 'UNLOCK_BOSS_DUNGEON': {
       const rank = action.payload;
-      if (!BOSS_DATA[rank]) return state;
       const dungeon = state.bossDungeon || {};
+      if (rank.startsWith('custom_')) {
+        const customBoss = (state.customBosses||[]).find(b => 'custom_'+b.id === rank);
+        if (!customBoss) return state;
+        const existing = dungeon[rank] || { hp: customBoss.maxHp, attackPoints: 0, phase: 'locked', playerHp: 100 };
+        if (existing.phase !== 'locked') return state;
+        return { ...state, bossDungeon: { ...dungeon, [rank]: { ...existing, hp: existing.hp || customBoss.maxHp, phase: 'unlocked' } } };
+      }
+      if (!BOSS_DATA[rank]) return state;
       const existing = dungeon[rank] || { hp: BOSS_DATA[rank].maxHp, attackPoints: 0, phase: 'locked', playerHp: 100 };
       if (existing.phase !== 'locked') return state;
-      return {
-        ...state,
-        bossDungeon: { ...dungeon, [rank]: { ...existing, phase: 'unlocked' } }
-      };
+      return { ...state, bossDungeon: { ...dungeon, [rank]: { ...existing, phase: 'unlocked' } } };
     }
     case 'ATTACK_BOSS_DUNGEON': {
       const { rank, hits } = action.payload;
-      if (!BOSS_DATA[rank]) return state;
       const dungeon = state.bossDungeon || {};
       const entry = dungeon[rank];
       if (!entry || entry.phase !== 'unlocked') return state;
       const hitCount = hits || 1;
-      if (entry.attackPoints < hitCount) return state;
+      const globalAP = state.hunter.attackPoints || 0;
+      if (globalAP < hitCount) return state;
 
-      const boss = BOSS_DATA[rank];
-      const newAP = Math.round((entry.attackPoints - hitCount) * 10) / 10;
+      // Resolve boss data — standard or custom
+      const boss = rank.startsWith('custom_')
+        ? (state.customBosses||[]).find(b => 'custom_'+b.id === rank)
+        : BOSS_DATA[rank];
+      if (!boss) return state;
+
+      const newAP = Math.round((globalAP - hitCount) * 10) / 10;
       const newBossHp = Math.max(0, entry.hp - hitCount);
       const bossDefeated = newBossHp <= 0;
-
-      // Counter-attack only when boss HP drops below 20% of max (phase gate)
       const threshold = boss.maxHp * 0.2;
-      const wasAbove = entry.hp > threshold;
-      const nowBelow = newBossHp <= threshold && newBossHp > 0;
-      // Counter fires once when crossing the threshold, and on every combo hit while in critical zone
       const inCritical = !bossDefeated && newBossHp <= threshold;
-      // Counter dmg scales with combo size but stays low
-      const counterDmg = inCritical ? Math.min(boss.counterDmg * Math.ceil(hitCount / 20), boss.counterDmg * 3) : 0;
+      const counterDmg = inCritical ? Math.min((boss.counterDmg||1) * Math.ceil(hitCount / 20), (boss.counterDmg||1) * 3) : 0;
       const newPlayerHp = Math.max(0, (entry.playerHp ?? 100) - counterDmg);
       const playerDead = newPlayerHp <= 0 && !bossDefeated;
-
       const newPhase = bossDefeated ? 'defeated' : playerDead ? 'player_dead' : 'unlocked';
 
       return {
         ...state,
+        hunter: { ...state.hunter, attackPoints: newAP },
         bossDungeon: {
           ...dungeon,
-          [rank]: { ...entry, attackPoints: newAP, hp: newBossHp, playerHp: newPlayerHp, phase: newPhase }
+          [rank]: { ...entry, hp: newBossHp, playerHp: newPlayerHp, phase: newPhase }
         },
         bossDefeated: bossDefeated ? [...(state.bossDefeated||[]), rank] : (state.bossDefeated||[]),
-        _bossEvent: bossDefeated ? { type:'defeated', rank, xpReward: boss.xpReward }
+        _bossEvent: bossDefeated ? { type:'defeated', rank, xpReward: boss.xpReward||500 }
                   : playerDead  ? { type:'player_dead', rank }
                   : inCritical && counterDmg > 0 ? { type:'counter', rank, dmg: counterDmg }
                   : null
@@ -3362,25 +3406,221 @@ function ReflectionModal({ questName, onSave, onSkip }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // BOSS DUNGEON SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
+function CreateBossModal({ newBoss, setNewBoss, onSave, onClose, state }) {
+  const emojis = ['👹','💀','🐉','👺','🕷️','🌑','☠️','🦇','🔥','⚔️','🗡️','🛡️','🧿','👁️','🌪️'];
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'88vh', overflowY:'auto' }}>
+        <div className="cinzel" style={{ color:'#9B59B6', fontSize:16, marginBottom:16, textAlign:'center' }}>👹 CREATE CUSTOM BOSS</div>
+        <div style={{ marginBottom:12 }}>
+          <label style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2, display:'block', marginBottom:6 }}>BOSS EMOJI</label>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:6 }}>
+            {emojis.map(e=>(
+              <button key={e} onClick={()=>setNewBoss(p=>({...p,emoji:e}))} style={{
+                width:36, height:36, borderRadius:6, cursor:'pointer', fontSize:18,
+                background: newBoss.emoji===e ? 'rgba(155,89,182,0.2)' : 'rgba(255,255,255,0.04)',
+                border: newBoss.emoji===e ? '2px solid #9B59B6' : '1px solid rgba(255,255,255,0.1)',
+              }}>{e}</button>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <span style={{ fontSize:10, color:'var(--text-dim)' }}>Or type:</span>
+            <input className="input-dark" value={newBoss.emoji} onChange={e=>setNewBoss(p=>({...p,emoji:e.target.value}))} style={{ width:60, textAlign:'center', fontSize:20 }}/>
+          </div>
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <label style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2, display:'block', marginBottom:6 }}>BOSS NAME *</label>
+          <input className="input-dark" value={newBoss.name} onChange={e=>setNewBoss(p=>({...p,name:e.target.value}))} placeholder="e.g. The Procrastination Lord"/>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
+          <div>
+            <label style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2, display:'block', marginBottom:6 }}>BOSS HP *</label>
+            <input className="input-dark" type="number" value={newBoss.maxHp} onChange={e=>setNewBoss(p=>({...p,maxHp:e.target.value}))} placeholder="500"/>
+            <div style={{ fontSize:8, color:'var(--text-dim)', marginTop:3 }}>1 AP = 1 damage</div>
+          </div>
+          <div>
+            <label style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2, display:'block', marginBottom:6 }}>XP REWARD</label>
+            <input className="input-dark" type="number" value={newBoss.xpReward} onChange={e=>setNewBoss(p=>({...p,xpReward:e.target.value}))} placeholder="1000"/>
+          </div>
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <label style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2, display:'block', marginBottom:6 }}>COUNTER DAMAGE (critical phase)</label>
+          <input className="input-dark" type="number" value={newBoss.counterDmg} onChange={e=>setNewBoss(p=>({...p,counterDmg:e.target.value}))} placeholder="2"/>
+          <div style={{ fontSize:8, color:'var(--text-dim)', marginTop:3 }}>HP damage to you per combo hit when boss is below 20%</div>
+        </div>
+        <div style={{ marginBottom:16 }}>
+          <label style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2, display:'block', marginBottom:6 }}>DESCRIPTION / CHALLENGE (optional)</label>
+          <textarea className="input-dark" value={newBoss.challengeDesc} onChange={e=>setNewBoss(p=>({...p,challengeDesc:e.target.value}))}
+            placeholder="Describe what this boss represents or what you must overcome..." style={{ minHeight:60, resize:'none', fontSize:11 }}/>
+        </div>
+        <div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(243,156,18,0.06)', border:'1px solid rgba(243,156,18,0.2)', marginBottom:16 }}>
+          <div className="cinzel" style={{ fontSize:10, color:'var(--gold)', marginBottom:4 }}>🗝️ DUNGEON KEY REQUIRED</div>
+          <div style={{ fontSize:11, color:'var(--text-dim)', lineHeight:1.6 }}>
+            This boss will be locked. You need a <span style={{ color:'var(--gold)' }}>Dungeon Key</span> (1,000 coins from Black Market) to unlock and fight it. You have <span style={{ color:(state.hunter?.dungeonKeys||0)>0?'var(--gold)':'var(--crimson)', fontFamily:'Cinzel,serif' }}>{state.hunter?.dungeonKeys||0} key{(state.hunter?.dungeonKeys||0)!==1?'s':''}</span>.
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={onSave} disabled={!newBoss.name.trim()} style={{
+            flex:1, padding:'12px', borderRadius:8, cursor:newBoss.name.trim()?'pointer':'not-allowed',
+            background:'rgba(155,89,182,0.15)', border:'2px solid #9B59B6',
+            color:'#9B59B6', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:1, opacity:newBoss.name.trim()?1:0.5
+          }}>👹 CREATE BOSS</button>
+          <button onClick={onClose} style={{
+            flex:1, padding:'12px', borderRadius:8, cursor:'pointer',
+            background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.1)',
+            color:'var(--text-dim)', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:1
+          }}>CANCEL</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AllDungeonsPanel({ state, availableRanks, activeRank, setSelectedRank, rank }) {
+  const BOSS_RANKS = ['D','C','B','A','S'];
+  const playerRankIdx = RANKS.indexOf(rank);
+  const customBosses = state.customBosses || [];
+  const dungeon = state.bossDungeon || {};
+  return (
+    <div className="panel" style={{ padding:14 }}>
+      <div className="cinzel" style={{ fontSize:10, color:'var(--text-dim)', letterSpacing:3, marginBottom:12 }}>ALL DUNGEONS</div>
+      {BOSS_RANKS.map(r => {
+        const b = BOSS_DATA[r];
+        const dun = dungeon[r];
+        const defeated = dun?.phase === 'defeated';
+        const unlocked = RANKS.indexOf(r) <= playerRankIdx;
+        const inProgress = dun?.phase === 'unlocked';
+        const hp = dun ? dun.hp : b.maxHp;
+        const hpPct = Math.max(0, (hp / b.maxHp) * 100);
+        const c = RANK_COLORS[r] || '#6a7a9a';
+        const isActive = activeRank === r;
+        return (
+          <div key={r} onClick={()=>{ if (unlocked) setSelectedRank(r); }}
+            style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 10px', marginBottom:5, borderRadius:7, cursor: unlocked ? 'pointer' : 'default',
+              background: defeated ? 'rgba(46,204,113,0.05)' : isActive ? `${c}0d` : 'rgba(255,255,255,0.02)',
+              border:`1px solid ${defeated ? 'rgba(46,204,113,0.25)' : isActive ? `${c}44` : 'rgba(255,255,255,0.05)'}` }}>
+            <span style={{ fontSize:18, opacity: unlocked ? 1 : 0.2 }}>{b.emoji}</span>
+            <div style={{ flex:1 }}>
+              <div className="cinzel" style={{ fontSize:10, color: defeated ? '#2ECC71' : unlocked ? c : 'rgba(255,255,255,0.2)' }}>{b.name}</div>
+              {unlocked && !defeated && (
+                <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:3 }}>
+                  <div style={{ flex:1, height:3, background:'rgba(255,255,255,0.05)', borderRadius:2, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:`${hpPct}%`, background:c, borderRadius:2 }}/>
+                  </div>
+                  <span style={{ fontSize:8, color:'var(--text-dim)', whiteSpace:'nowrap' }}>{hp}/{b.maxHp} HP</span>
+                </div>
+              )}
+              {!unlocked && <div style={{ fontSize:8, color:'rgba(255,255,255,0.2)', marginTop:2 }}>Reach {r}-Rank to unlock</div>}
+            </div>
+            <span style={{ fontSize:11, flexShrink:0 }}>
+              {defeated ? '✅' : !unlocked ? '🔒' : isActive ? <span className="cinzel" style={{ fontSize:9, color:c }}>◀</span> : <span className="cinzel" style={{ fontSize:9, color:'rgba(255,255,255,0.25)' }}>TAP</span>}
+            </span>
+          </div>
+        );
+      })}
+      {customBosses.map(b => {
+        const key = 'custom_'+b.id;
+        const dun = dungeon[key];
+        const defeated = dun?.phase === 'defeated';
+        const hp = dun ? dun.hp : b.maxHp;
+        const hpPct = Math.max(0, (hp / b.maxHp) * 100);
+        const isActive = activeRank === key;
+        return (
+          <div key={key} onClick={()=>setSelectedRank(key)}
+            style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 10px', marginBottom:5, borderRadius:7, cursor:'pointer',
+              background: defeated ? 'rgba(46,204,113,0.05)' : isActive ? 'rgba(155,89,182,0.08)' : 'rgba(255,255,255,0.02)',
+              border:`1px solid ${defeated ? 'rgba(46,204,113,0.25)' : isActive ? 'rgba(155,89,182,0.4)' : 'rgba(255,255,255,0.05)'}` }}>
+            <span style={{ fontSize:18 }}>{b.emoji||'👹'}</span>
+            <div style={{ flex:1 }}>
+              <div className="cinzel" style={{ fontSize:10, color: defeated ? '#2ECC71' : '#9B59B6' }}>{b.name} <span style={{ fontSize:8, color:'rgba(155,89,182,0.5)' }}>CUSTOM</span></div>
+              {!defeated && (
+                <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:3 }}>
+                  <div style={{ flex:1, height:3, background:'rgba(255,255,255,0.05)', borderRadius:2, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:`${hpPct}%`, background:'#9B59B6', borderRadius:2 }}/>
+                  </div>
+                  <span style={{ fontSize:8, color:'var(--text-dim)', whiteSpace:'nowrap' }}>{hp}/{b.maxHp} HP</span>
+                </div>
+              )}
+            </div>
+            <span style={{ fontSize:11, flexShrink:0 }}>
+              {defeated ? '✅' : isActive ? <span className="cinzel" style={{ fontSize:9, color:'#9B59B6' }}>◀</span> : <span className="cinzel" style={{ fontSize:9, color:'rgba(255,255,255,0.25)' }}>TAP</span>}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BossDungeonScreen({ state, dispatch, addXP, showNotif, sfx }) {
   const rank = state.hunter.rank;
-  const boss = BOSS_DATA[rank];
-  const dungeon = state.bossDungeon?.[rank] || { hp: boss?.maxHp || 0, attackPoints: 0, phase: 'locked', playerHp: 100 };
-  const prog = boss ? getBossChallengeProgress(boss, state) : { current: 0, target: 1 };
-  const isUnlocked = dungeon.phase === 'unlocked';
-  const isDefeated = dungeon.phase === 'defeated';
-  const isPlayerDead = dungeon.phase === 'player_dead';
+  const [selectedRank, setSelectedRank] = useState(null);
+  const [showCreateBoss, setShowCreateBoss] = useState(false);
+  const [newBoss, setNewBoss] = useState({ name:'', emoji:'👹', maxHp:500, counterDmg:2, xpReward:1000, challengeDesc:'', requirementType:'none' });
+
+  const BOSS_RANKS = ['D','C','B','A','S'];
+  const playerRankIdx = RANKS.indexOf(rank);
+  const customBosses = state.customBosses || [];
+
+  // All ranks the player has reached
+  const availableRanks = BOSS_RANKS.filter(r => RANKS.indexOf(r) <= playerRankIdx);
+
+  // Pending standard bosses
+  const pendingBosses = availableRanks.filter(r => {
+    const dun = state.bossDungeon?.[r];
+    return !dun || dun.phase !== 'defeated';
+  });
+
+  // All custom boss keys
+  const customKeys = customBosses.map(b => 'custom_'+b.id);
+
+  // Active rank = selected or lowest pending standard or first custom
+  const activeRank = selectedRank ||
+    (pendingBosses.length > 0 ? pendingBosses[0] :
+    customKeys.find(k => { const d = state.bossDungeon?.[k]; return !d || d.phase !== 'defeated'; }) ||
+    (availableRanks.length > 0 ? availableRanks[availableRanks.length-1] : null));
+
+  // Resolve boss data
+  const isCustom = activeRank?.startsWith('custom_');
+  const boss = !activeRank ? null
+    : isCustom ? customBosses.find(b => 'custom_'+b.id === activeRank)
+    : BOSS_DATA[activeRank];
+
+  const dungeon = (boss && activeRank)
+    ? (state.bossDungeon?.[activeRank] || { hp: boss.maxHp, attackPoints: 0, phase: 'locked', playerHp: 100 })
+    : null;
+
+  const prog = (boss && !isCustom) ? getBossChallengeProgress(boss, state) : { current: 1, target: 1 };
+  const isUnlocked = dungeon?.phase === 'unlocked';
+  const isDefeated = dungeon?.phase === 'defeated';
+  const isPlayerDead = dungeon?.phase === 'player_dead';
   const [showCounterFlash, setShowCounterFlash] = useState(false);
   const [lastAP, setLastAP] = useState(null);
 
   const bossHpPct = boss ? Math.max(0, (dungeon.hp / boss.maxHp) * 100) : 0;
   const isCritical = bossHpPct <= 20 && bossHpPct > 0;
   const bossColor = bossHpPct > 60 ? '#E74C3C' : bossHpPct > 30 ? '#F39C12' : '#9B59B6';
-  const playerHpColor = (dungeon.playerHp ?? 100) > 60 ? '#2ECC71' : (dungeon.playerHp ?? 100) > 30 ? '#F39C12' : '#E74C3C';
+  const playerHpColor = (dungeon?.playerHp ?? 100) > 60 ? '#2ECC71' : (dungeon?.playerHp ?? 100) > 30 ? '#F39C12' : '#E74C3C';
+  const ap = state.hunter.attackPoints || 0;
 
-  const ap = dungeon.attackPoints || 0;
+  const saveCustomBoss = () => {
+    if (!newBoss.name.trim() || !newBoss.maxHp) return;
+    dispatch({ type:'ADD_CUSTOM_BOSS', payload: {
+      name: newBoss.name.trim(),
+      emoji: newBoss.emoji || '👹',
+      maxHp: parseInt(newBoss.maxHp)||500,
+      counterDmg: parseInt(newBoss.counterDmg)||2,
+      xpReward: parseInt(newBoss.xpReward)||1000,
+      challengeDesc: newBoss.challengeDesc.trim(),
+      requirementType: newBoss.requirementType,
+      desc: `A custom dungeon boss created by ${state.hunter.name}.`,
+      taunt: ['You created me. Now face me.','I am your own challenge.'],
+    }});
+    showNotif('👹 CUSTOM BOSS CREATED');
+    setShowCreateBoss(false);
+    setNewBoss({ name:'', emoji:'👹', maxHp:500, counterDmg:2, xpReward:1000, challengeDesc:'', requirementType:'none' });
+  };
 
-  // Show counter flash when boss is in critical range
   useEffect(() => {
     if (isCritical) {
       const t = setInterval(() => setShowCounterFlash(f => !f), 800);
@@ -3390,17 +3630,46 @@ function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
     }
   }, [isCritical]);
 
-  // All past bosses for history section
   const allBosses = Object.entries(BOSS_DATA);
 
-  if (!boss) {
+  // E rank — no boss yet
+  if (rank === 'E') {
     return (
       <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24 }}>
-        <div style={{ fontSize:48, marginBottom:16 }}>🏆</div>
-        <div className="cinzel" style={{ fontSize:18, color:'var(--gold)', letterSpacing:3, marginBottom:8 }}>ALL BOSSES CLEARED</div>
-        <div style={{ fontSize:13, color:'var(--text-dim)', textAlign:'center', lineHeight:1.7 }}>
-          You have reached the peak. No more bosses remain for your rank.
+        <div style={{ fontSize:56, marginBottom:16 }}>🔒</div>
+        <div className="cinzel" style={{ fontSize:18, color:'var(--mana)', letterSpacing:3, marginBottom:12, textAlign:'center' }}>DUNGEON SEALED</div>
+        <div style={{ fontSize:13, color:'var(--text-dim)', textAlign:'center', lineHeight:1.8, marginBottom:20 }}>
+          You are still awakening, Hunter.<br/>Reach <span style={{ color:'var(--gold)' }}>D-Rank</span> to unlock your first dungeon boss.
         </div>
+        <div style={{ padding:'12px 20px', borderRadius:8, background:'rgba(79,195,247,0.06)', border:'1px solid rgba(79,195,247,0.2)', fontSize:11, color:'var(--mana)', textAlign:'center', marginBottom:16 }}>
+          Keep completing quests and earning XP to rank up.
+        </div>
+        <button onClick={()=>setShowCreateBoss(true)} className="btn-mana" style={{ fontSize:11 }}>
+          + CREATE CUSTOM BOSS
+        </button>
+        {showCreateBoss && <CreateBossModal newBoss={newBoss} setNewBoss={setNewBoss} onSave={saveCustomBoss} onClose={()=>setShowCreateBoss(false)} state={state}/>}
+      </div>
+    );
+  }
+
+  if (!boss || !dungeon) {
+    return (
+      <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
+        <div style={{ padding:'12px 16px 0', flexShrink:0, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div className="cinzel" style={{ fontSize:17, color:'var(--gold)', letterSpacing:3 }}>⚔️ BOSS DUNGEON</div>
+          <button onClick={()=>setShowCreateBoss(true)} style={{ padding:'5px 12px', borderRadius:6, cursor:'pointer', background:'rgba(155,89,182,0.1)', border:'1px solid rgba(155,89,182,0.4)', color:'#9B59B6', fontFamily:'Cinzel,serif', fontSize:10 }}>+ CUSTOM</button>
+        </div>
+        <div className="scrollable" style={{ flex:1, padding:'10px 16px 24px' }}>
+          <div style={{ textAlign:'center', padding:'32px 16px' }}>
+            <div style={{ fontSize:56, marginBottom:12 }}>🏆</div>
+            <div className="cinzel" style={{ fontSize:18, color:'var(--gold)', letterSpacing:3, marginBottom:8 }}>ALL CLEARED</div>
+            <div style={{ fontSize:13, color:'var(--text-dim)', lineHeight:1.7 }}>
+              Every dungeon boss has fallen. Rank up or create a custom boss to keep fighting.
+            </div>
+          </div>
+          <AllDungeonsPanel state={state} availableRanks={availableRanks} activeRank={activeRank} setSelectedRank={setSelectedRank} rank={rank}/>
+        </div>
+        {showCreateBoss && <CreateBossModal newBoss={newBoss} setNewBoss={setNewBoss} onSave={saveCustomBoss} onClose={()=>setShowCreateBoss(false)} state={state}/>}
       </div>
     );
   }
@@ -3409,10 +3678,19 @@ function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
     <div style={{ height:'100%', display:'flex', flexDirection:'column' }}>
       {/* Header */}
       <div style={{ padding:'12px 16px 0', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
           <span style={{ fontSize:20 }}>⚔️</span>
           <div className="cinzel" style={{ fontSize:17, color:'var(--crimson)', letterSpacing:3 }}>BOSS DUNGEON</div>
-          <div style={{ marginLeft:'auto' }}>
+          <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }}>
+            {(state.hunter.dungeonKeys||0) > 0 && (
+              <span style={{ fontSize:10, color:'var(--gold)', fontFamily:'Cinzel,serif', padding:'3px 8px', borderRadius:5, background:'rgba(243,156,18,0.1)', border:'1px solid rgba(243,156,18,0.3)' }}>
+                🗝️ {state.hunter.dungeonKeys}
+              </span>
+            )}
+            <button onClick={()=>setShowCreateBoss(true)} style={{ padding:'4px 10px', borderRadius:5, cursor:'pointer', background:'rgba(155,89,182,0.1)', border:'1px solid rgba(155,89,182,0.35)', color:'#9B59B6', fontFamily:'Cinzel,serif', fontSize:9 }}>+ CUSTOM</button>
+            {isCustom && (
+              <button onClick={()=>{ if(window.confirm('Delete this custom boss?')) { dispatch({type:'DELETE_CUSTOM_BOSS', payload: activeRank.replace('custom_','')}); setSelectedRank(null); } }} style={{ padding:'4px 8px', borderRadius:5, cursor:'pointer', background:'rgba(231,76,60,0.08)', border:'1px solid rgba(231,76,60,0.3)', color:'var(--crimson)', fontFamily:'Cinzel,serif', fontSize:9 }}>🗑</button>
+            )}
             <span style={{ fontSize:9, color: isDefeated ? '#2ECC71' : isUnlocked ? 'var(--gold)' : 'var(--text-dim)', letterSpacing:2, fontFamily:'Cinzel,serif',
               padding:'2px 8px', borderRadius:4,
               background: isDefeated ? 'rgba(46,204,113,0.1)' : isUnlocked ? 'rgba(243,156,18,0.1)' : 'rgba(255,255,255,0.04)',
@@ -3422,7 +3700,53 @@ function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
             </span>
           </div>
         </div>
+
+        {/* Boss selector tabs */}
+        {(availableRanks.length > 1 || customBosses.length > 0) && (
+          <div style={{ display:'flex', gap:5, overflowX:'auto', paddingBottom:4 }}>
+            {availableRanks.map(r => {
+              const d = state.bossDungeon?.[r];
+              const defeated = d?.phase === 'defeated';
+              const active = activeRank === r;
+              const c = RANK_COLORS[r] || '#6a7a9a';
+              return (
+                <button key={r} onClick={()=>setSelectedRank(r)} style={{
+                  flexShrink:0, padding:'5px 12px', borderRadius:6, cursor:'pointer',
+                  background: active ? `${c}18` : 'transparent',
+                  border: active ? `1px solid ${c}66` : '1px solid rgba(255,255,255,0.08)',
+                  color: defeated ? '#2ECC71' : active ? c : 'var(--text-dim)',
+                  fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, position:'relative'
+                }}>
+                  {BOSS_DATA[r].emoji} {r}
+                  {!defeated && <span style={{ position:'absolute', top:-3, right:-3, width:7, height:7, borderRadius:'50%', background:'#E74C3C' }}/>}
+                  {defeated && <span style={{ marginLeft:4, fontSize:8 }}>✅</span>}
+                </button>
+              );
+            })}
+            {customBosses.map(b => {
+              const key = 'custom_'+b.id;
+              const d = state.bossDungeon?.[key];
+              const defeated = d?.phase === 'defeated';
+              const active = activeRank === key;
+              return (
+                <button key={key} onClick={()=>setSelectedRank(key)} style={{
+                  flexShrink:0, padding:'5px 12px', borderRadius:6, cursor:'pointer',
+                  background: active ? 'rgba(155,89,182,0.18)' : 'transparent',
+                  border: active ? '1px solid rgba(155,89,182,0.6)' : '1px solid rgba(255,255,255,0.08)',
+                  color: defeated ? '#2ECC71' : active ? '#9B59B6' : 'var(--text-dim)',
+                  fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1, position:'relative'
+                }}>
+                  {b.emoji||'👹'} {b.name.slice(0,8)}
+                  {!defeated && <span style={{ position:'absolute', top:-3, right:-3, width:7, height:7, borderRadius:'50%', background:'#9B59B6' }}/>}
+                  {defeated && <span style={{ marginLeft:4, fontSize:8 }}>✅</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {showCreateBoss && <CreateBossModal newBoss={newBoss} setNewBoss={setNewBoss} onSave={saveCustomBoss} onClose={()=>setShowCreateBoss(false)} state={state}/>}
 
       <div className="scrollable" style={{ flex:1, padding:'10px 16px 24px', display:'flex', flexDirection:'column', gap:12 }}>
 
@@ -3492,30 +3816,81 @@ function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
                 {isUnlocked ? 'SEAL BROKEN — FIGHT ACTIVE' : 'UNLOCK REQUIREMENT'}
               </div>
             </div>
-            <div style={{ fontSize:12, color:'var(--text)', marginBottom:10, lineHeight:1.6 }}>{boss.challengeDesc}</div>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, fontSize:10 }}>
-              <span style={{ color:'var(--text-dim)' }}>PROGRESS</span>
-              <span className="cinzel" style={{ color: prog.current >= prog.target ? '#2ECC71' : 'var(--gold)' }}>{prog.current} / {prog.target}</span>
-            </div>
-            <div style={{ height:10, background:'rgba(255,255,255,0.04)', borderRadius:5, overflow:'hidden', border:'1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ height:'100%', width:`${Math.min(100,(prog.current/prog.target)*100)}%`,
-                background: prog.current >= prog.target ? 'linear-gradient(90deg,#2ECC71,#27ae60)' : 'linear-gradient(90deg,#F39C1288,#F39C12)',
-                borderRadius:5, transition:'width 0.8s ease',
-                boxShadow: prog.current >= prog.target ? '0 0 8px #2ECC7188' : '0 0 4px #F39C1244' }}/>
-            </div>
-            <div style={{ display:'flex', justifyContent:'center', gap:6, marginTop:8 }}>
-              {[...Array(prog.target)].map((_,i)=>(
-                <div key={i} style={{
-                  width:26, height:26, borderRadius:6,
-                  background: i < prog.current ? (isUnlocked?'#2ECC71':'#F39C12') : 'rgba(255,255,255,0.04)',
-                  border:`1.5px solid ${i < prog.current ? (isUnlocked?'#2ECC71':'#F39C12') : 'rgba(255,255,255,0.1)'}`,
-                  display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, transition:'all 0.3s',
-                  boxShadow: i < prog.current ? `0 0 6px ${isUnlocked?'#2ECC71':'#F39C12'}66` : 'none',
-                }}>
-                  {i < prog.current ? '✓' : <span style={{ color:'rgba(255,255,255,0.2)', fontSize:9 }}>{i+1}</span>}
+            {/* Custom boss — key required to unlock */}
+            {isCustom && !isUnlocked && (
+              <div>
+                {boss.challengeDesc && (
+                  <div style={{ fontSize:12, color:'var(--text)', marginBottom:12, lineHeight:1.6 }}>{boss.challengeDesc}</div>
+                )}
+                <div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(243,156,18,0.06)', border:'1px solid rgba(243,156,18,0.2)', marginBottom:12 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <div className="cinzel" style={{ fontSize:11, color:'var(--gold)', marginBottom:2 }}>🗝️ DUNGEON KEY REQUIRED</div>
+                      <div style={{ fontSize:10, color:'var(--text-dim)' }}>Purchase from the Black Market for 1,000 coins</div>
+                    </div>
+                    <div className="cinzel" style={{ fontSize:18, color:(state.hunter.dungeonKeys||0)>0?'var(--gold)':'var(--crimson)' }}>
+                      {state.hunter.dungeonKeys||0} 🗝️
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
+                {(state.hunter.dungeonKeys||0) > 0 ? (
+                  <button onClick={()=>{
+                    dispatch({ type:'USE_DUNGEON_KEY', payload: activeRank });
+                    showNotif(`🗝️ KEY USED — ${boss.name} SEAL BROKEN!`);
+                    sfx('bossDefeated');
+                  }} style={{
+                    width:'100%', padding:'12px', borderRadius:8, cursor:'pointer',
+                    background:'rgba(243,156,18,0.15)', border:'2px solid var(--gold)',
+                    color:'var(--gold)', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:2
+                  }}>
+                    🗝️ USE KEY TO UNLOCK
+                  </button>
+                ) : (
+                  <button onClick={()=>showNotif('🗝️ Buy a Dungeon Key from the Black Market')} style={{
+                    width:'100%', padding:'12px', borderRadius:8, cursor:'pointer',
+                    background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.1)',
+                    color:'rgba(255,255,255,0.3)', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:1
+                  }}>
+                    NO KEYS — VISIT BLACK MARKET
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Standard boss — challenge progress */}
+            {!isCustom && (
+              <>
+                <div style={{ fontSize:12, color:'var(--text)', marginBottom:10, lineHeight:1.6 }}>{boss.challengeDesc}</div>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, fontSize:10 }}>
+                  <span style={{ color:'var(--text-dim)' }}>PROGRESS</span>
+                  <span className="cinzel" style={{ color: prog.current >= prog.target ? '#2ECC71' : 'var(--gold)' }}>{prog.current} / {prog.target}</span>
+                </div>
+                <div style={{ height:10, background:'rgba(255,255,255,0.04)', borderRadius:5, overflow:'hidden', border:'1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ height:'100%', width:`${Math.min(100,(prog.current/prog.target)*100)}%`,
+                    background: prog.current >= prog.target ? 'linear-gradient(90deg,#2ECC71,#27ae60)' : 'linear-gradient(90deg,#F39C1288,#F39C12)',
+                    borderRadius:5, transition:'width 0.8s ease',
+                    boxShadow: prog.current >= prog.target ? '0 0 8px #2ECC7188' : '0 0 4px #F39C1244' }}/>
+                </div>
+                <div style={{ display:'flex', justifyContent:'center', gap:6, marginTop:8 }}>
+                  {[...Array(prog.target)].map((_,i)=>(
+                    <div key={i} style={{
+                      width:26, height:26, borderRadius:6,
+                      background: i < prog.current ? (isUnlocked?'#2ECC71':'#F39C12') : 'rgba(255,255,255,0.04)',
+                      border:`1.5px solid ${i < prog.current ? (isUnlocked?'#2ECC71':'#F39C12') : 'rgba(255,255,255,0.1)'}`,
+                      display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, transition:'all 0.3s',
+                      boxShadow: i < prog.current ? `0 0 6px ${isUnlocked?'#2ECC71':'#F39C12'}66` : 'none',
+                    }}>
+                      {i < prog.current ? '✓' : <span style={{ color:'rgba(255,255,255,0.2)', fontSize:9 }}>{i+1}</span>}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {/* Unlocked state for custom boss */}
+            {isCustom && isUnlocked && (
+              <div style={{ fontSize:11, color:'#2ECC71', lineHeight:1.6 }}>
+                You chose to face this boss. Fight well, Hunter.
+              </div>
+            )}
           </div>
         )}
 
@@ -3585,7 +3960,7 @@ function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
                   <button key={hits} onClick={()=>{
                     if (!enough || !isUnlocked) return;
                     setLastAP(ap - hits);
-                    dispatch({ type:'ATTACK_BOSS_DUNGEON', payload:{ rank, hits } });
+                    dispatch({ type:'ATTACK_BOSS_DUNGEON', payload:{ rank: activeRank, hits } });
                   }} disabled={!enough} style={{
                     padding:'12px 4px', borderRadius:9, cursor: enough ? 'pointer' : 'not-allowed',
                     background: enough
@@ -3637,7 +4012,7 @@ function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
             <div style={{ fontSize:11, color:'rgba(255,255,255,0.3)', marginBottom:18 }}>
               Keep earning AP through quests and habits to return stronger.
             </div>
-            <button onClick={() => dispatch({ type:'REVIVE_PLAYER_DUNGEON', payload: rank })} style={{
+            <button onClick={() => dispatch({ type:'REVIVE_PLAYER_DUNGEON', payload: activeRank })} style={{
               padding:'12px 32px', borderRadius:8, cursor:'pointer',
               background:'rgba(79,195,247,0.12)', border:'2px solid var(--mana)',
               color:'var(--mana)', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:2
@@ -3659,39 +4034,8 @@ function BossDungeonScreen({ state, dispatch, addXP, showNotif }) {
           </div>
         )}
 
-        {/* ── PAST BOSSES ── */}
-        <div className="panel" style={{ padding:14 }}>
-          <div className="cinzel" style={{ fontSize:10, color:'var(--text-dim)', letterSpacing:3, marginBottom:12 }}>ALL DUNGEONS</div>
-          {allBosses.map(([r, b]) => {
-            const def = (state.bossDefeated||[]).includes(r);
-            const unl = RANKS.indexOf(state.hunter.rank) >= RANKS.indexOf(r);
-            const dun = state.bossDungeon?.[r];
-            const hp = dun ? dun.hp : b.maxHp;
-            const hpPct = Math.max(0, (hp / b.maxHp) * 100);
-            const c = RANK_COLORS[r] || '#6a7a9a';
-            return (
-              <div key={r} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 10px', marginBottom:5, borderRadius:7,
-                background: def ? 'rgba(46,204,113,0.05)' : r === rank ? `${c}0a` : 'rgba(255,255,255,0.02)',
-                border:`1px solid ${def ? 'rgba(46,204,113,0.25)' : r === rank ? `${c}33` : 'rgba(255,255,255,0.05)'}` }}>
-                <span style={{ fontSize:18, opacity: unl ? 1 : 0.25 }}>{b.emoji}</span>
-                <div style={{ flex:1 }}>
-                  <div className="cinzel" style={{ fontSize:10, color: def ? '#2ECC71' : unl ? c : 'var(--text-dim)' }}>{b.name}</div>
-                  {unl && !def && (
-                    <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:3 }}>
-                      <div style={{ flex:1, height:3, background:'rgba(255,255,255,0.05)', borderRadius:2, overflow:'hidden' }}>
-                        <div style={{ height:'100%', width:`${hpPct}%`, background:c, borderRadius:2 }}/>
-                      </div>
-                      <span style={{ fontSize:8, color:'var(--text-dim)', whiteSpace:'nowrap' }}>{hp}/{b.maxHp} HP</span>
-                    </div>
-                  )}
-                </div>
-                <span style={{ fontSize:11 }}>
-                  {def ? '✅' : r === rank ? <span className="cinzel" style={{ fontSize:9, color:c }}>CURRENT</span> : unl ? '📖' : '🔒'}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+        {/* ── ALL DUNGEONS ── */}
+        <AllDungeonsPanel state={state} availableRanks={availableRanks} activeRank={activeRank} setSelectedRank={setSelectedRank} rank={rank}/>
 
       </div>
     </div>
@@ -5698,14 +6042,14 @@ function getDailyForbiddenBoss(dateStr) {
 }
 
 const BLACK_MARKET_POOL = [
-  { id:'bm_ap_boost',    name:'AP Surge',           desc:'Instantly gain 50 AP for current rank dungeon', cost:200, effect:'ap_boost',    value:50,   emoji:'⚔️' },
-  { id:'bm_xp_double',   name:'XP Surge (1 Quest)', desc:'Next quest you complete gives 2× XP',          cost:300, effect:'xp_boost',    value:2,    emoji:'⚡' },
-  { id:'bm_debt_clear',  name:'Debt Absolution',    desc:'Clear one debt entry of your choice',          cost:400, effect:'debt_clear',  value:1,    emoji:'📜' },
-  { id:'bm_entropy_stop',name:'Entropy Freeze',     desc:'Prevent all stat decay for 7 days',            cost:350, effect:'entropy_stop', value:7,   emoji:'🧊' },
-  { id:'bm_nemesis_dmg', name:'Nemesis Bane',        desc:'Deal 100 extra damage to Nemesis',             cost:250, effect:'nemesis_dmg', value:100,  emoji:'🗡️' },
-  { id:'bm_hp_potion',   name:'Shadow Potion',       desc:'Restore 20 HP to your dungeon player HP',     cost:150, effect:'hp_restore',  value:20,   emoji:'🧪' },
-  { id:'bm_borrow_ap',   name:'Future Debt',        desc:'Borrow 200 AP now — owe 300 next week',        cost:0,   effect:'borrow_ap',   value:200,  emoji:'🔮' },
-  { id:'bm_stat_boost',  name:'Essence Crystal',    desc:'+3 to a random stat immediately',              cost:500, effect:'stat_boost',  value:3,    emoji:'💎' },
+  { id:'bm_ap_boost',      name:'AP Surge',           desc:'Instantly gain 50 AP',                         cost:200,  effect:'ap_boost',      value:50,  emoji:'⚔️' },
+  { id:'bm_xp_double',     name:'XP Surge (1 Quest)', desc:'Next quest you complete gives 2× XP',          cost:300,  effect:'xp_boost',      value:2,   emoji:'⚡' },
+  { id:'bm_debt_clear',    name:'Debt Absolution',    desc:'Clear one debt entry of your choice',          cost:400,  effect:'debt_clear',    value:1,   emoji:'📜' },
+  { id:'bm_entropy_stop',  name:'Entropy Freeze',     desc:'Prevent all stat decay for 7 days',            cost:350,  effect:'entropy_stop',  value:7,   emoji:'🧊' },
+  { id:'bm_nemesis_dmg',   name:'Nemesis Bane',        desc:'Deal 100 extra damage to Nemesis',             cost:250,  effect:'nemesis_dmg',   value:100, emoji:'🗡️' },
+  { id:'bm_hp_potion',     name:'Shadow Potion',       desc:'Restore 20 HP to your dungeon player HP',     cost:150,  effect:'hp_restore',    value:20,  emoji:'🧪' },
+  { id:'bm_borrow_ap',     name:'Future Debt',        desc:'Borrow 200 AP now — owe 300 XP next week',    cost:0,    effect:'borrow_ap',     value:200, emoji:'🔮' },
+  { id:'bm_stat_boost',    name:'Essence Crystal',    desc:'+3 to a random stat immediately',              cost:500,  effect:'stat_boost',    value:3,   emoji:'💎' },
 ];
 
 function getWeeklyMarketItems(weekId) {
@@ -5802,7 +6146,7 @@ function ShadowCloneScreen({ state, dispatch, showNotif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function NemesisScreen({ state, dispatch, addXP, showNotif }) {
   const nemesis = state.nemesis || { traits:[], hp:500, maxHp:500, phase:'lurking', failCount:0 };
-  const ap = (state.bossDungeon?.[state.hunter.rank]?.attackPoints || 0);
+  const ap = state.hunter.attackPoints || 0;
   const hpPct = nemesis.maxHp > 0 ? Math.round((nemesis.hp/nemesis.maxHp)*100) : 100;
   const hpColor = hpPct > 60 ? '#E74C3C' : hpPct > 30 ? '#F39C12' : '#9B59B6';
   const comboAttack = (hits) => {
@@ -5951,7 +6295,7 @@ function BlackMarketScreen({ state, dispatch, addXP, showNotif }) {
     if ((bm.purchases||[]).includes(item.id)) return;
     if (item.cost>0 && (state.hunter.coins||0)<item.cost){ showNotif('❌ NOT ENOUGH COINS'); return; }
     dispatch({ type:'PURCHASE_BLACK_MARKET', payload:item.id });
-    if (item.effect==='ap_boost') { dispatch({ type:'EARN_ATTACK_POINTS', payload:{ rank:state.hunter.rank, amount:item.value } }); showNotif(`⚔️ +${item.value} AP added`); }
+    if (item.effect==='ap_boost') { dispatch({ type:'EARN_ATTACK_POINTS', payload:{ amount:item.value } }); showNotif(`⚔️ +${item.value} AP added`); }
     else if (item.effect==='nemesis_dmg') { dispatch({ type:'ATTACK_NEMESIS', payload:item.value }); showNotif(`🗡️ Nemesis took ${item.value} damage`); }
     else if (item.effect==='hp_restore') { dispatch({ type:'HEAL_HP', payload:item.value }); showNotif(`🧪 +${item.value} HP`); }
     else if (item.effect==='stat_boost') {
@@ -5960,7 +6304,7 @@ function BlackMarketScreen({ state, dispatch, addXP, showNotif }) {
       dispatch({ type:'GAIN_STAT', payload:{ stat:s, amount:item.value } });
       showNotif(`💎 +${item.value} ${s.slice(0,3).toUpperCase()} from Essence Crystal`);
     } else if (item.effect==='borrow_ap') {
-      dispatch({ type:'EARN_ATTACK_POINTS', payload:{ rank:state.hunter.rank, amount:item.value } });
+      dispatch({ type:'EARN_ATTACK_POINTS', payload:{ amount:item.value } });
       dispatch({ type:'ADD_DEBT', payload:{ description:'Black Market borrowed AP', originalXP:300, currentXP:300 } });
       showNotif(`🔮 +${item.value} AP borrowed — 300 XP debt added`);
     } else { showNotif(`✅ ${item.name} applied`); }
@@ -6174,7 +6518,7 @@ function ForbiddenZoneScreen({ state, dispatch, addXP, showNotif }) {
   const isMidnightWindow = hour >= 0 && hour < 4;
   const alreadyToday = fz.lastUnlocked === today;
   const boss = fz.currentBoss;
-  const ap = state.bossDungeon?.[state.hunter.rank]?.attackPoints || 0;
+  const ap = state.hunter.attackPoints || 0;
   const hpPct = boss ? Math.max(0,(boss.hp/boss.maxHp)*100) : 0;
   const unlock = () => {
     dispatch({ type:'UNLOCK_FORBIDDEN_ZONE', payload:getDailyForbiddenBoss(today) });
@@ -8307,6 +8651,9 @@ const REWARDS_CATALOG = [
   { id:'potion_medium', type:'Potion', name:'Greater Health Potion',desc:'Restores 400 HP instantly.',    cost:2500, minRank:'C', icon:'🍶', category:'Potions', hpGrant:400  },
   { id:'potion_large',  type:'Potion', name:'Elixir of Vitality',  desc:'Restores 1000 HP instantly.',   cost:6000, minRank:'A', icon:'💎', category:'Potions', hpGrant:1000 },
   { id:'potion_full',   type:'Potion', name:'Phoenix Elixir',      desc:'Fully restores HP to maximum.', cost:15000,minRank:'S', icon:'🔥', category:'Potions', hpGrant:'full'},
+
+  // DUNGEON KEYS
+  { id:'dungeon_key', type:'DungeonKey', name:'Dungeon Key', desc:'Unlocks one custom boss dungeon. Single use. You can hold multiple.', cost:1000, minRank:'E', icon:'🗝️', category:'Keys' },
 ];
 
 const RANK_ORDER = ['E','D','C','B','A','S','MONARCH'];
@@ -8324,19 +8671,29 @@ function RewardsScreen({ state, dispatch, addXP, showNotif, sfx }) {
   const hunterRank = state.hunter.rank;
   const customRewards = state.customRewards || [];
 
-  const CATS = ['Titles','Boosts','Badges','XP Boosts','Potions','Custom'];
+  const CATS = ['Titles','Boosts','Badges','XP Boosts','Potions','Keys','Custom'];
 
   const purchase = (item) => {
-    if (item.type === 'Potion') {
-      if (coins < item.cost) return;
-      const maxHp = state.hunter.maxHp || RANK_MAX_HP[state.hunter.rank] || 100;
-      const currentHp = state.hunter.hp ?? maxHp;
-      const healAmt = item.hpGrant === 'full' ? maxHp - currentHp : item.hpGrant;
-      const actualHeal = Math.min(healAmt, maxHp - currentHp);
+    if (item.type === 'DungeonKey') {
+      if (coins < item.cost) { showNotif('❌ NOT ENOUGH COINS'); return; }
       dispatch({ type:'PURCHASE_REWARD', payload:{ id: item.id + '_' + Date.now(), cost: item.cost, item:{ ...item } } });
-      dispatch({ type:'HEAL_HP', payload: healAmt });
+      dispatch({ type:'GAIN_DUNGEON_KEY' });
       sfx('purchase');
-      showNotif(`🧪 +${actualHeal} HP RESTORED`);
+      showNotif(`🗝️ DUNGEON KEY ACQUIRED — ${(state.hunter.dungeonKeys||0)+1} key${(state.hunter.dungeonKeys||0)+1!==1?'s':''} total`);
+      setJustBought(item.id);
+      setTimeout(() => setJustBought(null), 2000);
+      setConfirmItem(null);
+      return;
+    }
+    if (item.type === 'Potion') {
+      if (coins < item.cost) { showNotif('❌ NOT ENOUGH COINS'); return; }
+      // Each potion purchase gets a guaranteed unique ID
+      const uniqueId = item.id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+      const collectionEntry = { ...item, id: uniqueId, acquiredAt: Date.now(), source: 'purchase', consumed: false };
+      dispatch({ type:'PURCHASE_REWARD', payload:{ id: uniqueId, cost: item.cost, item: collectionEntry } });
+      dispatch({ type:'ADD_TO_COLLECTION', payload: collectionEntry });
+      sfx('purchase');
+      showNotif(`🧪 ${item.name} stored in Collection — use when ready`);
       setJustBought(item.id);
       setTimeout(() => setJustBought(null), 2000);
       setConfirmItem(null);
@@ -9862,6 +10219,7 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
       reflections:      cleanState.reflections       || [],
       oath:             cleanState.oath              || {},
       bossDefeated:     cleanState.bossDefeated      || [],
+      customBosses:     cleanState.customBosses      || [],
       bossDungeon:      cleanState.bossDungeon        || {},
       activityLog:      cleanState.activityLog       || [],
       lastActivity:     cleanState.lastActivity      || null,
@@ -10289,23 +10647,40 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // COLLECTION SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function CollectionScreen({ state, dispatch }) {
+function CollectionScreen({ state, dispatch, showNotif, sfx }) {
   const collection = state.collection || [];
   const [filter, setFilter] = useState('all');
 
   const FILTERS = [
-    { k:'all', l:'All' },
-    { k:'purchase', l:'Purchased' },
-    { k:'quest_reward', l:'Quest Rewards' },
+    { k:'all',          l:'All'          },
+    { k:'potions',      l:'🧪 Potions'   },
+    { k:'purchase',     l:'Purchased'    },
+    { k:'quest_reward', l:'Quest Rewards'},
   ];
 
-  const filtered = filter === 'all' ? collection : collection.filter(i => i.source === filter);
-  const titles = collection.filter(i => i.type === 'Title' || i.category === 'Titles');
+  const filtered = filter === 'all' ? collection
+    : filter === 'potions' ? collection.filter(i => i.type === 'Potion')
+    : collection.filter(i => i.source === filter);
+
+  const titles   = collection.filter(i => i.type === 'Title' || i.category === 'Titles');
+  const potions  = collection.filter(i => i.type === 'Potion' && !i.consumed);
   const equippedTitle = state.hunter.equippedTitle;
 
   const TYPE_COLORS = {
     Title: '#F39C12', Badge: '#9B59B6', StatBoost: '#E74C3C',
-    XPBoost: '#4FC3F7', Boosts: '#4FC3F7', real: '#2ECC71', virtual: '#4FC3F7'
+    XPBoost: '#4FC3F7', Boosts: '#4FC3F7', real: '#2ECC71', virtual: '#4FC3F7',
+    Potion: '#2ECC71', DungeonKey: '#F39C12',
+  };
+
+  const consumePotion = (item) => {
+    if (item.consumed) return;
+    const maxHp = state.hunter.maxHp || 100;
+    const currentHp = state.hunter.hp ?? maxHp;
+    const healAmt = item.hpGrant === 'full' ? maxHp : (item.hpGrant || 0);
+    const actual = Math.min(healAmt, maxHp - currentHp);
+    dispatch({ type:'CONSUME_POTION', payload: item.id });
+    if (sfx) sfx('purchase');
+    if (showNotif) showNotif(actual > 0 ? `🧪 +${actual} HP RESTORED` : `🧪 ${item.name} used — HP already full`);
   };
 
   return (
@@ -10325,11 +10700,19 @@ function CollectionScreen({ state, dispatch }) {
           </div>
         )}
 
+        {/* Potion stock banner */}
+        {potions.length > 0 && (
+          <div style={{ padding:'8px 14px', marginBottom:12, background:'rgba(46,204,113,0.06)', border:'1px solid rgba(46,204,113,0.2)', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <div style={{ fontSize:11, color:'#2ECC71' }}>🧪 {potions.length} potion{potions.length!==1?'s':''} in stock</div>
+            <div style={{ fontSize:11, color:'var(--text-dim)' }}>HP: {state.hunter.hp??100}/{state.hunter.maxHp||100}</div>
+          </div>
+        )}
+
         {/* Filter Tabs */}
-        <div style={{ display:'flex', gap:6 }}>
+        <div style={{ display:'flex', gap:5, overflowX:'auto' }}>
           {FILTERS.map(f=>(
             <button key={f.k} onClick={()=>setFilter(f.k)} style={{
-              flex:1, padding:'6px 4px', fontSize:10, borderRadius:6, cursor:'pointer',
+              flexShrink:0, padding:'6px 10px', fontSize:10, borderRadius:6, cursor:'pointer',
               border: filter===f.k ? '1px solid var(--gold)' : '1px solid var(--border)',
               background: filter===f.k ? 'rgba(243,156,18,0.15)' : 'transparent',
               color: filter===f.k ? 'var(--gold)' : 'var(--text-dim)', fontFamily:'Cinzel,serif'
@@ -10340,15 +10723,16 @@ function CollectionScreen({ state, dispatch }) {
 
       <div className="scrollable" style={{ flex:1, padding:'0 16px 24px' }}>
         {/* Stats row */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:8, marginBottom:16 }}>
           {[
-            { l:'TOTAL', v:collection.length, c:'var(--gold)' },
-            { l:'TITLES', v:titles.length, c:'#F39C12' },
-            { l:'REWARDS', v:collection.filter(i=>i.source==='quest_reward').length, c:'#2ECC71' },
+            { l:'TOTAL',   v:collection.length,                                               c:'var(--gold)' },
+            { l:'TITLES',  v:titles.length,                                                    c:'#F39C12'    },
+            { l:'POTIONS', v:potions.length,                                                   c:'#2ECC71'    },
+            { l:'REWARDS', v:collection.filter(i=>i.source==='quest_reward').length,           c:'#4FC3F7'    },
           ].map(s=>(
-            <div key={s.l} className="panel" style={{ padding:'10px 8px', textAlign:'center' }}>
-              <div className="cinzel" style={{ fontSize:20, color:s.c }}>{s.v}</div>
-              <div style={{ fontSize:9, color:'var(--text-dim)', letterSpacing:2 }}>{s.l}</div>
+            <div key={s.l} className="panel" style={{ padding:'8px 4px', textAlign:'center' }}>
+              <div className="cinzel" style={{ fontSize:18, color:s.c }}>{s.v}</div>
+              <div style={{ fontSize:8, color:'var(--text-dim)', letterSpacing:1 }}>{s.l}</div>
             </div>
           ))}
         </div>
@@ -10362,38 +10746,61 @@ function CollectionScreen({ state, dispatch }) {
         )}
 
         {filtered.map((item, idx) => {
-          const isTitle = item.type === 'Title' || item.category === 'Titles';
+          const isTitle   = item.type === 'Title' || item.category === 'Titles';
+          const isPotion  = item.type === 'Potion';
           const isEquipped = isTitle && equippedTitle === item.name;
+          const consumed  = item.consumed;
           const sourceColor = item.source === 'quest_reward' ? '#2ECC71' : 'var(--gold)';
           const sourceLabel = item.source === 'quest_reward' ? `⚔️ ${item.questName || 'Quest Reward'}` : '🪙 Purchased';
-          const itemColor = TYPE_COLORS[item.type] || TYPE_COLORS[item.category] || 'var(--mana)';
+          const itemColor = consumed ? 'var(--text-dim)' : (TYPE_COLORS[item.type] || TYPE_COLORS[item.category] || 'var(--mana)');
 
           return (
             <div key={idx} className="panel" style={{
               padding:14, marginBottom:10,
-              borderColor: isEquipped ? 'rgba(243,156,18,0.5)' : `${itemColor}33`,
-              boxShadow: isEquipped ? '0 0 16px rgba(243,156,18,0.2)' : 'none'
+              borderColor: isEquipped ? 'rgba(243,156,18,0.5)' : consumed ? 'rgba(255,255,255,0.05)' : `${itemColor}33`,
+              boxShadow: isEquipped ? '0 0 16px rgba(243,156,18,0.2)' : 'none',
+              opacity: consumed ? 0.5 : 1,
             }}>
               <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                <div style={{ fontSize:28, width:40, textAlign:'center' }}>{item.icon || item.emoji || '✦'}</div>
+                <div style={{ fontSize:28, width:40, textAlign:'center', filter: consumed ? 'grayscale(1)' : 'none' }}>{item.icon || item.emoji || '✦'}</div>
                 <div style={{ flex:1 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', marginBottom:2 }}>
                     <span className="cinzel" style={{ fontSize:13, color: isEquipped ? 'var(--gold)' : itemColor }}>{item.name}</span>
                     {isEquipped && <span style={{ fontSize:9, color:'var(--gold)', border:'1px solid var(--gold)', padding:'1px 5px', borderRadius:3 }}>ACTIVE</span>}
+                    {consumed && <span style={{ fontSize:9, color:'var(--text-dim)', border:'1px solid rgba(255,255,255,0.1)', padding:'1px 5px', borderRadius:3 }}>CONSUMED</span>}
+                    {isPotion && !consumed && (
+                      <span style={{ fontSize:9, color:'#2ECC71', border:'1px solid rgba(46,204,113,0.3)', padding:'1px 5px', borderRadius:3 }}>
+                        +{item.hpGrant === 'full' ? 'FULL HP' : `${item.hpGrant} HP`}
+                      </span>
+                    )}
                   </div>
                   {item.desc && <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:4 }}>{item.desc}</div>}
                   <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                     <span style={{ fontSize:10, color:sourceColor }}>{sourceLabel}</span>
                     {item.acquiredAt && <span style={{ fontSize:10, color:'var(--text-dim)' }}>· {new Date(item.acquiredAt).toLocaleDateString()}</span>}
+                    {consumed && item.consumedAt && <span style={{ fontSize:10, color:'var(--text-dim)' }}>Used {new Date(item.consumedAt).toLocaleDateString()}</span>}
                   </div>
                 </div>
-                {/* Equip title button */}
-                {isTitle && !isEquipped && (
-                  <button className="btn-gold" style={{ fontSize:10, padding:'5px 10px' }}
-                    onClick={()=>dispatch({ type:'EQUIP_REWARD', payload:{ type:'Title', value:item.name } })}>
-                    EQUIP
-                  </button>
-                )}
+                <div style={{ display:'flex', flexDirection:'column', gap:6, flexShrink:0 }}>
+                  {/* Equip title button */}
+                  {isTitle && !isEquipped && (
+                    <button className="btn-gold" style={{ fontSize:10, padding:'5px 10px' }}
+                      onClick={()=>dispatch({ type:'EQUIP_REWARD', payload:{ type:'Title', value:item.name } })}>
+                      EQUIP
+                    </button>
+                  )}
+                  {/* Consume potion button */}
+                  {isPotion && !consumed && (
+                    <button onClick={()=>consumePotion(item)} style={{
+                      padding:'6px 12px', borderRadius:7, cursor:'pointer',
+                      background:'rgba(46,204,113,0.15)', border:'2px solid #2ECC71',
+                      color:'#2ECC71', fontFamily:'Cinzel,serif', fontSize:10, letterSpacing:1,
+                      whiteSpace:'nowrap'
+                    }}>
+                      🧪 USE
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -11103,7 +11510,7 @@ export default function App() {
     // 0.1% of every XP gain converts to attack points for current rank dungeon
     const apGain = Math.round(displayAmount * 0.001 * 10) / 10;
     if (apGain > 0) {
-      dispatch({ type:'EARN_ATTACK_POINTS', payload: { rank: hunter.rank, amount: apGain } });
+      dispatch({ type:'EARN_ATTACK_POINTS', payload: { amount: apGain } });
     }
     playSound('xpGain', soundEnabled);
     const id = Date.now() + Math.random();
@@ -11126,21 +11533,25 @@ export default function App() {
     }
   }, [loaded, state.onboarded]);
 
-  // Boss dungeon: auto-unlock when challenge is met
+  // Boss dungeon: auto-unlock when challenge is met (checks all pending bosses)
   useEffect(() => {
     if (!loaded || !state.onboarded) return;
-    const rank = state.hunter.rank;
-    const boss = BOSS_DATA[rank];
-    if (!boss) return;
-    const dungeon = state.bossDungeon?.[rank];
-    if (dungeon?.phase === 'defeated') return;
-    if (dungeon?.phase === 'locked' || !dungeon) {
-      const prog = getBossChallengeProgress(boss, state);
-      if (prog.current >= prog.target) {
-        dispatch({ type:'UNLOCK_BOSS_DUNGEON', payload: rank });
-        showNotif('⚔️ BOSS SEAL BROKEN — Dungeon tab unlocked!');
+    const playerRankIdx = RANKS.indexOf(state.hunter.rank);
+    const BOSS_RANKS = ['D','C','B','A','S'];
+    BOSS_RANKS.forEach(r => {
+      if (RANKS.indexOf(r) > playerRankIdx) return; // not reached this rank yet
+      const boss = BOSS_DATA[r];
+      if (!boss) return;
+      const dungeon = state.bossDungeon?.[r];
+      if (dungeon?.phase === 'defeated') return;
+      if (dungeon?.phase === 'locked' || !dungeon) {
+        const prog = getBossChallengeProgress(boss, state);
+        if (prog.current >= prog.target) {
+          dispatch({ type:'UNLOCK_BOSS_DUNGEON', payload: r });
+          showNotif(`⚔️ ${boss.name} SEAL BROKEN — Dungeon ${r} unlocked!`);
+        }
       }
-    }
+    });
   }, [state.quests, state.habits, state.xpLog, state.penaltyLog, state.bigThree, loaded]);
 
   // Handle boss fight events (defeat XP reward, player death notification)
