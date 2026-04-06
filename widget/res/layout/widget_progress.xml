@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wp_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:padding="12dp">
+
+    <!-- Header row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="2dp">
+
+        <TextView
+            android:id="@+id/wp_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="E-RANK  ·  LV.1"
+            android:textColor="#DDE8FF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/wp_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="LAST 14 DAYS"
+            android:textColor="#4D607E"
+            android:textSize="8sp"
+            android:letterSpacing="0.1" />
+    </LinearLayout>
+
+    <!-- Total XP line -->
+    <TextView
+        android:id="@+id/wp_total"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Earn XP to start your graph"
+        android:textColor="#FFB547"
+        android:textSize="9sp"
+        android:layout_marginBottom="5dp" />
+
+    <!-- Graph image (drawn in Java as a bitmap) -->
+    <ImageView
+        android:id="@+id/wp_graph"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scaleType="fitXY"
+        android:adjustViewBounds="true" />
+
+</LinearLayout>

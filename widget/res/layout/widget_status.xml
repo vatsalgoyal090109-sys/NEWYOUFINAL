@@ -1,1 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ws_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:padding="14dp"
+    android:gravity="center_vertical">
 
+    <!-- Row 1: Rank · Name · Level -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="9dp">
+
+        <TextView
+            android:id="@+id/ws_rank"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:gravity="center"
+            android:text="E"
+            android:textColor="#4FC3F7"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:background="@drawable/widget_rank_bg"
+            android:layout_marginEnd="10dp" />
+
+        <TextView
+            android:id="@+id/ws_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="HUNTER"
+            android:textColor="#DDE8FF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/ws_level"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="LV.1"
+            android:textColor="#FFB547"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Row 2: XP label -->
+    <TextView
+        android:id="@+id/ws_xp_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="XP"
+        android:textColor="#4D607E"
+        android:textSize="8sp"
+        android:layout_marginBottom="3dp" />
+
+    <!-- XP bar -->
+    <ProgressBar
+        android:id="@+id/ws_xp_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="7dp"
+        android:progressDrawable="@drawable/widget_xp_progress"
+        android:progress="0"
+        android:max="100"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Row 3: HP numbers + HP bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="3dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="HP"
+            android:textColor="#4D607E"
+            android:textSize="8sp"
+            android:layout_marginEnd="6dp" />
+
+        <TextView
+            android:id="@+id/ws_hp_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="100 / 100"
+            android:textColor="#4D607E"
+            android:textSize="8sp"
+            android:gravity="end" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/ws_hp_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="7dp"
+        android:progressDrawable="@drawable/widget_hp_progress"
+        android:progress="100"
+        android:max="100"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#0C00D4FF"
+        android:layout_marginBottom="7dp" />
+
+    <!-- Row 4: Coins -->
+    <TextView
+        android:id="@+id/ws_coins"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0 COINS"
+        android:textColor="#FFB547"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="5dp" />
+
+    <!-- Row 5: Stats -->
+    <TextView
+        android:id="@+id/ws_stats"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="STR 1   INT 1   DIS 1   VIT 1   FOC 1   CHA 1"
+        android:textColor="#8A9BBF"
+        android:textSize="9sp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:layout_marginBottom="5dp" />
+
+    <!-- Row 6: Oath (gone when empty) -->
+    <LinearLayout
+        android:id="@+id/ws_oath_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="&#128274;"
+            android:textSize="10sp"
+            android:layout_marginEnd="5dp" />
+
+        <TextView
+            android:id="@+id/ws_oath"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text=""
+            android:textColor="#9B59B6"
+            android:textSize="9sp"
+            android:maxLines="2"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+</LinearLayout>
