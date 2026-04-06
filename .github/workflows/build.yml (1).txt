@@ -1,0 +1,228 @@
+name: Build NEW YOU APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Add Capacitor Android platform
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          else
+            echo "Android platform already exists"
+          fi
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # ════════════════════════════════════════════════════════════════════════
+      # WIDGET INJECTION — copies all files, patches manifest, fixes MainActivity
+      # ════════════════════════════════════════════════════════════════════════
+
+      - name: Copy widget Java files
+        run: |
+          JAVA="android/app/src/main/java/com/newyou/app"
+          mkdir -p "$JAVA"
+          cp widget/java/NewYouWidget.java          "$JAVA/"
+          cp widget/java/QuestsWidget.java          "$JAVA/"
+          cp widget/java/QuestsWidgetService.java   "$JAVA/"
+          cp widget/java/QuestsWidgetFactory.java   "$JAVA/"
+          cp widget/java/HabitCompleteReceiver.java "$JAVA/"
+          cp widget/java/ProgressWidget.java        "$JAVA/"
+          cp widget/java/WidgetPlugin.java          "$JAVA/"
+
+      - name: Copy widget resource files
+        run: |
+          mkdir -p android/app/src/main/res/layout
+          mkdir -p android/app/src/main/res/xml
+          mkdir -p android/app/src/main/res/drawable
+
+          cp widget/res/layout/widget_status.xml      android/app/src/main/res/layout/
+          cp widget/res/layout/widget_quests.xml      android/app/src/main/res/layout/
+          cp widget/res/layout/widget_quest_item.xml  android/app/src/main/res/layout/
+          cp widget/res/layout/widget_progress.xml    android/app/src/main/res/layout/
+
+          cp widget/res/xml/widget_status_info.xml    android/app/src/main/res/xml/
+          cp widget/res/xml/widget_quests_info.xml    android/app/src/main/res/xml/
+          cp widget/res/xml/widget_progress_info.xml  android/app/src/main/res/xml/
+
+          cp widget/res/drawable/widget_background.xml  android/app/src/main/res/drawable/
+          cp widget/res/drawable/widget_rank_bg.xml     android/app/src/main/res/drawable/
+          cp widget/res/drawable/widget_xp_progress.xml android/app/src/main/res/drawable/
+          cp widget/res/drawable/widget_hp_progress.xml android/app/src/main/res/drawable/
+          cp widget/res/drawable/widget_habit_btn.xml   android/app/src/main/res/drawable/
+
+      - name: Patch AndroidManifest.xml
+        run: |
+          python3 - <<'PYEOF'
+          path = "android/app/src/main/AndroidManifest.xml"
+          with open(path, "r") as f:
+              content = f.read()
+
+          if "NewYouWidget" in content:
+              print("Already patched — skipping")
+              exit(0)
+
+          injection = """
+              <!-- ══ NEW YOU WIDGETS ══ -->
+
+              <receiver android:name=".NewYouWidget" android:exported="true">
+                  <intent-filter>
+                      <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                  </intent-filter>
+                  <meta-data
+                      android:name="android.appwidget.provider"
+                      android:resource="@xml/widget_status_info" />
+              </receiver>
+
+              <receiver android:name=".QuestsWidget" android:exported="true">
+                  <intent-filter>
+                      <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                  </intent-filter>
+                  <meta-data
+                      android:name="android.appwidget.provider"
+                      android:resource="@xml/widget_quests_info" />
+              </receiver>
+
+              <receiver android:name=".ProgressWidget" android:exported="true">
+                  <intent-filter>
+                      <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                  </intent-filter>
+                  <meta-data
+                      android:name="android.appwidget.provider"
+                      android:resource="@xml/widget_progress_info" />
+              </receiver>
+
+              <receiver android:name=".HabitCompleteReceiver" android:exported="false">
+                  <intent-filter>
+                      <action android:name="com.newyou.app.COMPLETE_HABIT" />
+                  </intent-filter>
+              </receiver>
+
+              <service
+                  android:name=".QuestsWidgetService"
+                  android:exported="false"
+                  android:permission="android.permission.BIND_REMOTEVIEWS" />
+          """
+
+          content = content.replace("</application>", injection + "\n    </application>")
+
+          with open(path, "w") as f:
+              f.write(content)
+
+          print("AndroidManifest.xml patched successfully")
+          PYEOF
+
+      - name: Overwrite MainActivity to register WidgetPlugin
+        run: |
+          cat > "android/app/src/main/java/com/newyou/app/MainActivity.java" << 'JAVA_EOF'
+package com.newyou.app;
+
+import android.os.Bundle;
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(WidgetPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+}
+JAVA_EOF
+
+      # ════════════════════════════════════════════════════════════════════════
+      # END WIDGET INJECTION
+      # ════════════════════════════════════════════════════════════════════════
+
+      - name: Install ImageMagick
+        run: sudo apt-get install -y imagemagick
+
+      - name: Generate all icon sizes
+        run: |
+          declare -A SIZES
+          SIZES[mipmap-mdpi]=48
+          SIZES[mipmap-hdpi]=72
+          SIZES[mipmap-xhdpi]=96
+          SIZES[mipmap-xxhdpi]=144
+          SIZES[mipmap-xxxhdpi]=192
+
+          for dir in "${!SIZES[@]}"; do
+            size="${SIZES[$dir]}"
+            dest="android/app/src/main/res/${dir}"
+            mkdir -p "$dest"
+            convert icon.png -resize ${size}x${size} "$dest/ic_launcher.png"
+            convert icon.png -resize ${size}x${size} "$dest/ic_launcher_round.png"
+            convert icon.png -resize ${size}x${size} "$dest/ic_launcher_foreground.png"
+          done
+
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@mipmap/ic_launcher_foreground"/>
+              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@mipmap/ic_launcher_foreground"/>
+              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF
+
+      - name: Set app name to NEW YOU
+        run: |
+          sed -i 's/android:label="[^"]*"/android:label="NEW YOU"/g' \
+            android/app/src/main/AndroidManifest.xml
+
+      - name: Make Gradle executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          find android/app/build/outputs/apk/debug/ -name "*.apk" \
+            -exec mv {} android/app/build/outputs/apk/debug/newyou.apk \;
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NewYou-APK
+          path: android/app/build/outputs/apk/debug/newyou.apk
+          retention-days: 30
