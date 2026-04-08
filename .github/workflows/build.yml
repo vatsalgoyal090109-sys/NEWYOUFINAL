@@ -97,19 +97,18 @@ jobs:
       - name: Overwrite MainActivity to register WidgetPlugin
         run: |
           cat > "android/app/src/main/java/com/system/app/MainActivity.java" << 'JAVA_EOF'
-package com.system.app;
+          package com.system.app;
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity {
+          @Override
+          public void onCreate(Bundle savedInstanceState) {
+          registerPlugin(WidgetPlugin.class);
+          super.onCreate(savedInstanceState);
+          }
+          }
+          JAVA_EOF
 
-import android.os.Bundle;
-import com.getcapacitor.BridgeActivity;
-
-public class MainActivity extends BridgeActivity {
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        registerPlugin(WidgetPlugin.class);
-        super.onCreate(savedInstanceState);
-    }
-}
-JAVA_EOF
 
       # ════════════════════════════════════════════════════════════════════════
       # END WIDGET INJECTION
