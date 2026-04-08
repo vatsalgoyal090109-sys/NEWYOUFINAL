@@ -1,4 +1,4 @@
-package com.newyou.app;
+package com.system.app;
 
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
@@ -22,43 +22,55 @@ public class ProgressWidget extends AppWidgetProvider {
     public static final String PREFS = "NewYouProgressWidget";
 
     public static void updateAppWidget(Context ctx, AppWidgetManager mgr, int id) {
-        SharedPreferences p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-
-        String xpLogJson = p.getString("xpLog",  "[]");
-        int    level     = p.getInt("level",      1);
-        String rank      = p.getString("rank",    "E");
-        int    totalXP   = p.getInt("totalXP",    0);
-
-        int[]    values = new int[0];
-        String[] labels = new String[0];
-        try {
-            JSONArray arr = new JSONArray(xpLogJson);
-            int n = arr.length();
-            values = new int[n];
-            labels = new String[n];
-            for (int i = 0; i < n; i++) {
-                JSONObject e = arr.getJSONObject(i);
-                values[i] = e.optInt("xp",   0);
-                labels[i] = e.optString("date", "");
-            }
-        } catch (Exception ignored) {}
-
-        Bitmap graph = drawGraph(values, labels);
-
         RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget_progress);
-        v.setImageViewBitmap(R.id.wp_graph, graph);
-        v.setTextViewText(R.id.wp_title,    rank + "-RANK  \u00b7  LV." + level);
-        v.setTextViewText(R.id.wp_total,    totalXP > 0
-                ? formatXP(totalXP) + " TOTAL XP"
-                : "Earn XP to build your graph");
-        v.setTextViewText(R.id.wp_subtitle, values.length > 0
-                ? "LAST " + values.length + " DAYS" : "");
 
-        Intent launch = new Intent(ctx, MainActivity.class);
-        launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent pi = PendingIntent.getActivity(ctx, 30, launch,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        v.setOnClickPendingIntent(R.id.wp_root, pi);
+        try {
+            SharedPreferences p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+
+            String xpLogJson = p.getString("xpLog",  "[]");
+            int    level     = p.getInt("level",      1);
+            String rank      = p.getString("rank",    "E");
+            int    totalXP   = p.getInt("totalXP",    0);
+
+            int[]    values = new int[0];
+            String[] labels = new String[0];
+
+            if (xpLogJson != null && xpLogJson.startsWith("[")) {
+                try {
+                    JSONArray arr = new JSONArray(xpLogJson);
+                    int n = arr.length();
+                    values = new int[n];
+                    labels = new String[n];
+                    for (int i = 0; i < n; i++) {
+                        JSONObject e = arr.getJSONObject(i);
+                        values[i] = e.optInt("xp",   0);
+                        labels[i] = e.optString("date", "");
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            Bitmap graph = drawGraph(values, labels);
+            v.setImageViewBitmap(R.id.wp_graph, graph);
+            v.setTextViewText(R.id.wp_title, rank + "-RANK  \u00b7  LV." + level);
+            v.setTextViewText(R.id.wp_total, totalXP > 0
+                    ? formatXP(totalXP) + " TOTAL XP"
+                    : "Earn XP to build your graph");
+            v.setTextViewText(R.id.wp_subtitle, values.length > 0
+                    ? "LAST " + values.length + " DAYS" : "");
+
+        } catch (Exception e) {
+            v.setTextViewText(R.id.wp_title,    "SYSTEM");
+            v.setTextViewText(R.id.wp_total,    "Open app to sync");
+            v.setTextViewText(R.id.wp_subtitle, "");
+        }
+
+        try {
+            Intent launch = new Intent(ctx, MainActivity.class);
+            launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            PendingIntent pi = PendingIntent.getActivity(ctx, 30, launch,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            v.setOnClickPendingIntent(R.id.wp_root, pi);
+        } catch (Exception ignored) {}
 
         mgr.updateAppWidget(id, v);
     }
@@ -67,8 +79,6 @@ public class ProgressWidget extends AppWidgetProvider {
     public void onUpdate(Context ctx, AppWidgetManager mgr, int[] ids) {
         for (int id : ids) updateAppWidget(ctx, mgr, id);
     }
-
-    // ── Graph rendering ───────────────────────────────────────────────────────
 
     static Bitmap drawGraph(int[] values, String[] labels) {
         final int W = 800, H = 300;
@@ -96,13 +106,13 @@ public class ProgressWidget extends AppWidgetProvider {
             py[i] = PT + CH * (1f - (float) values[i] / maxVal);
         }
 
-        // Grid
         Paint gp = new Paint(); gp.setColor(0x1200D4FF); gp.setStrokeWidth(1);
-        for (int g = 0; g <= 3; g++) c.drawLine(PL, PT + CH * g / 3f, PL + CW, PT + CH * g / 3f, gp);
+        for (int g = 0; g <= 3; g++)
+            c.drawLine(PL, PT + CH * g / 3f, PL + CW, PT + CH * g / 3f, gp);
         int vSkip = n <= 14 ? 1 : 3;
-        for (int i = 0; i < n; i += vSkip) c.drawLine(px[i], PT, px[i], PT + CH, gp);
+        for (int i = 0; i < n; i += vSkip)
+            c.drawLine(px[i], PT, px[i], PT + CH, gp);
 
-        // Fill under line
         Path fill = new Path();
         fill.moveTo(px[0], PT + CH);
         fill.lineTo(px[0], py[0]);
@@ -114,7 +124,6 @@ public class ProgressWidget extends AppWidgetProvider {
                 0x4400D4FF, 0x0000D4FF, Shader.TileMode.CLAMP));
         c.drawPath(fill, fp);
 
-        // Line
         Path line = new Path();
         line.moveTo(px[0], py[0]);
         for (int i = 1; i < n; i++) line.lineTo(px[i], py[i]);
@@ -124,24 +133,27 @@ public class ProgressWidget extends AppWidgetProvider {
         lp.setStrokeJoin(Paint.Join.ROUND); lp.setStrokeCap(Paint.Cap.ROUND);
         c.drawPath(line, lp);
 
-        // Dots
-        Paint do_ = new Paint(Paint.ANTI_ALIAS_FLAG); do_.setColor(0xFF00D4FF);
-        Paint di  = new Paint(Paint.ANTI_ALIAS_FLAG); di.setColor(0xFFFFFFFF);
-        for (int i = 0; i < n; i++) { c.drawCircle(px[i], py[i], 5, do_); c.drawCircle(px[i], py[i], 2.5f, di); }
+        Paint dOuter = new Paint(Paint.ANTI_ALIAS_FLAG); dOuter.setColor(0xFF00D4FF);
+        Paint dInner = new Paint(Paint.ANTI_ALIAS_FLAG); dInner.setColor(0xFFFFFFFF);
+        for (int i = 0; i < n; i++) {
+            c.drawCircle(px[i], py[i], 5, dOuter);
+            c.drawCircle(px[i], py[i], 2.5f, dInner);
+        }
 
-        // X-axis date labels
         if (labels != null) {
-            Paint lbl = txt(0xFF4D607E, 19); lbl.setTextAlign(Paint.Align.CENTER);
+            Paint lbl = txt(0xFF4D607E, 19);
+            lbl.setTextAlign(Paint.Align.CENTER);
             int sk = n <= 7 ? 1 : n <= 14 ? 2 : 3;
             for (int i = 0; i < n; i += sk) {
                 String s = (i < labels.length && labels[i].length() >= 10)
-                        ? labels[i].substring(5) : (i < labels.length ? labels[i] : "");
+                        ? labels[i].substring(5)
+                        : (i < labels.length ? labels[i] : "");
                 c.drawText(s, px[i], H - 10, lbl);
             }
         }
 
-        // Max label
-        Paint yl = txt(0xFF4D607E, 19); yl.setTextAlign(Paint.Align.LEFT);
+        Paint yl = txt(0xFF4D607E, 19);
+        yl.setTextAlign(Paint.Align.LEFT);
         c.drawText(formatXP(maxVal), PL + 2, PT + 16, yl);
 
         return bmp;
