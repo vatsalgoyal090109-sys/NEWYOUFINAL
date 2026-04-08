@@ -1,4 +1,4 @@
-name: Build NEW YOU APK
+name: Build SYSTEM APK
 
 on:
   push:
@@ -200,9 +200,9 @@ jobs:
           </adaptive-icon>
           EOF
 
-      - name: Set app name to NEW YOU
+      - name: Set app name to SYSTEM
         run: |
-          sed -i 's/android:label="[^"]*"/android:label="NEW YOU"/g' \
+          sed -i 's/android:label="[^"]*"/android:label="SYSTEM"/g' \
             android/app/src/main/AndroidManifest.xml
 
       - name: Make Gradle executable
@@ -216,11 +216,11 @@ jobs:
       - name: Rename APK
         run: |
           find android/app/build/outputs/apk/debug/ -name "*.apk" \
-            -exec mv {} android/app/build/outputs/apk/debug/newyou.apk \;
+            -exec mv {} android/app/build/outputs/apk/debug/SYSTEM.apk \;
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NewYou-APK
-          path: android/app/build/outputs/apk/debug/newyou.apk
+          name: SYSTEM-APK
+          path: android/app/build/outputs/apk/debug/system.apk
           retention-days: 30
