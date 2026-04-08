@@ -1,6 +1,6 @@
 {
-  "appId": "com.newyou.app",
-  "appName": "NEW YOU",
+  "appId": "com.system.app",
+  "appName": "SYSTEM",
   "webDir": "dist",
   "bundledWebRuntime": false,
   "server": {
