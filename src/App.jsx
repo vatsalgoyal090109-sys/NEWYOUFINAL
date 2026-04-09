@@ -334,6 +334,14 @@ body.light-theme .modal-box { background:#f0f4ff; }
 @keyframes xpBarGrow  { from{width:var(--xp-from,0%)} to{width:var(--xp-to,100%)} }
 @keyframes floatUp    { 0%{transform:translateY(0);opacity:0.8} 100%{transform:translateY(-120px);opacity:0} }
 @keyframes flashOut   { 0%{opacity:0.9} 100%{opacity:0} }
+@keyframes sysBoxIn   { 0%{opacity:0;transform:translateY(-14px) scale(0.96)} 60%{opacity:1;transform:translateY(2px) scale(1.01)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+@keyframes sysBoxOut  { 0%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(0.94)} }
+@keyframes cursorBlink{ 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes questGlow  { 0%,100%{box-shadow:0 0 18px rgba(255,181,71,0.25),0 0 40px rgba(255,181,71,0.08)} 50%{box-shadow:0 0 32px rgba(255,181,71,0.55),0 0 70px rgba(255,181,71,0.2)} }
+@keyframes acceptPulse{ 0%,100%{box-shadow:0 0 14px rgba(0,212,255,0.4)} 50%{box-shadow:0 0 32px rgba(0,212,255,0.9),0 0 60px rgba(0,212,255,0.4)} }
+@keyframes ariseSlam  { 0%{opacity:0;letter-spacing:60px;filter:blur(12px)} 40%{opacity:1;letter-spacing:14px;filter:blur(0)} 100%{opacity:1;letter-spacing:14px;filter:blur(0)} }
+@keyframes dustFloat  { 0%{transform:translateY(0) translateX(0);opacity:0.6} 100%{transform:translateY(-120px) translateX(var(--dx,20px));opacity:0} }
+@keyframes redPulse   { 0%,100%{opacity:0.25} 50%{opacity:0.55} }
 
 .anim-arise      { animation:arise-intro 3s ease-in-out forwards; }
 .anim-levelup    { animation:levelUpFlash 0.8s ease-out forwards; }
@@ -2552,7 +2560,7 @@ function LevelUpOverlay({ data, onClose, dispatch }) {
               )}
             </>
           )}
-          {phase < 2 && <div style={{ marginTop:28, fontSize:10, color:'rgba(255,255,255,0.2)', letterSpacing:2 }}>TAP TO SKIP</div>}
+
         </div>
       )}
 
@@ -2821,149 +2829,377 @@ function XPBar({ current, needed, blue }) {
 // ONBOARDING
 // ─────────────────────────────────────────────────────────────────────────────
 // ─── CINEMATIC INTRO ─────────────────────────────────────────────────────────
-const INTRO_LINES = [
-  { text: "THE WORLD TRAINED YOU TO OBEY.",        delay: 0,    duration: 2200, size: 18, color: '#6a7a9a', spacing: 4 },
-  { text: "THE SYSTEM?",                            delay: 2400, duration: 1400, size: 14, color: '#4a5a7a', spacing: 6 },
-  { text: "TO CONSUME YOU.",                        delay: 3900, duration: 2000, size: 22, color: '#E74C3C', spacing: 3, glow: '#E74C3C' },
-  { text: "YOU'VE BEEN ASLEEP...",                  delay: 6100, duration: 2400, size: 16, color: '#6a7a9a', spacing: 5 },
-  { text: "BUT I NEVER SLEEP.",                     delay: 8700, duration: 2200, size: 20, color: '#4FC3F7', spacing: 4, glow: '#4FC3F7' },
-  { text: "NOW, THE QUESTION IS YOURS.",            delay: 11100,duration: 2400, size: 15, color: '#a0b4cc', spacing: 3 },
-  { text: "WILL YOU USE THE SYSTEM...",             delay: 13700,duration: 2000, size: 18, color: '#F39C12', spacing: 3, glow: '#F39C12' },
-  { text: "...OR LET THE SYSTEM USE YOU?",          delay: 15900,duration: 2800, size: 18, color: '#E74C3C', spacing: 2, glow: '#E74C3C' },
-  { text: "[ WELCOME, PLAYER ]",                    delay: 19000,duration: 2600, size: 13, color: '#4FC3F7', spacing: 8 },
-  { text: "UNLOCK YOUR POTENTIAL.",                 delay: 21800,duration: 3000, size: 28, color: '#fff',    spacing: 6, glow: '#4FC3F7', bold: true },
-  { text: "NEW YOU.",                                delay: 25200,duration: 3500, size: 72, color: '#fff',    spacing: 8, glow: '#4FC3F7', bold: true, final: true },
+// ─── SOLO LEVELING — SYSTEM INTRODUCTION CINEMATIC ─────────────────────────
+// Sequence-driven: each step has a type, text to typewrite, and timing.
+// Mimics the exact scene where Sung Jin-woo first encounters the System
+// in the double dungeon — notification boxes, typewriter text, quest panel,
+// the accept moment, then ARISE.
+
+const SL_SEQUENCE = [
+  // type:'dark'   → just atmosphere, no box yet
+  // type:'sys'    → blue system notification box, typewriter text
+  // type:'warn'   → red warning box
+  // type:'quest'  → gold quest panel
+  // type:'accept' → pulsing accept button auto-confirms
+  // type:'arise'  → full-screen ARISE finale
+  { type:'dark',   duration:1800 },
+  { type:'sys',    text:'[ SYSTEM ]',                                    small:true,  duration:1200 },
+  { type:'sys',    text:'Critical condition detected.',                               duration:1600 },
+  { type:'sys',    text:'Probability of survival:  2%.',                              duration:1800 },
+  { type:'warn',   text:'⚠  YOU ARE DYING.',                                         duration:2000 },
+  { type:'sys',    text:'...',                                                        duration:1200 },
+  { type:'sys',    text:'However.',                                       bold:true,  duration:1400 },
+  { type:'sys',    text:'An anomaly has been detected within this subject.',           duration:2200 },
+  { type:'sys',    text:'Potential classification:',                      small:true, duration:1000 },
+  { type:'sys',    text:'BEYOND MEASURABLE LIMITS.',                      bold:true,  duration:2000 },
+  { type:'sys',    text:'The System has selected you.',                               duration:2000 },
+  { type:'quest',  title:'✦  NEW QUEST ISSUED  ✦',
+                   lines:['Survive.','Become the strongest.','Defy what you were.'],
+                   duration:3200 },
+  { type:'sys',    text:'Will you accept the quest?',                     bold:true,  duration:1200 },
+  { type:'accept',                                                                    duration:3000 },
+  { type:'sys',    text:'Quest accepted.',                                            duration:1400 },
+  { type:'sys',    text:'Congratulations.',                               bold:true,  duration:1200 },
+  { type:'sys',    text:'You are now a Player.',                          bold:true,  duration:1600 },
+  { type:'arise',                                                                     duration:3800 },
 ];
 
-// INTRO line display durations (ms each line is shown solo before advancing)
-const INTRO_LINE_DURATIONS = [2200,1400,2000,2400,2200,2400,2000,2800,2600,3000,3500];
+// Precompute absolute start times from durations + typewriter time
+function buildTimeline(seq) {
+  let t = 0;
+  return seq.map(step => {
+    // Typewriter time ≈ text.length * 38ms
+    const typeMs = step.text
+      ? step.text.length * 38
+      : step.lines
+        ? step.lines.join('').length * 38 + step.lines.length * 300
+        : 0;
+    const entry = { ...step, startAt: t, typeMs };
+    t += typeMs + (step.duration || 0);
+    return entry;
+  });
+}
+const SL_TIMELINE = buildTimeline(SL_SEQUENCE);
+const SL_TOTAL_MS = SL_TIMELINE[SL_TIMELINE.length - 1].startAt
+                  + SL_TIMELINE[SL_TIMELINE.length - 1].typeMs
+                  + (SL_TIMELINE[SL_TIMELINE.length - 1].duration || 0);
 
-function CinematicIntro({ onDone }) {
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [visible, setVisible] = useState(false);
-  const [vibrating, setVibrating] = useState(false);
-  const [phase, setPhase] = useState('lines'); // 'lines' | 'flash'
-  const totalLines = INTRO_LINES.length;
-
-  const advance = () => {
-    setVisible(false);
-    setTimeout(() => {
-      if (currentIdx >= totalLines - 1) {
-        setPhase('flash');
-        setTimeout(onDone, 900);
-      } else {
-        setCurrentIdx(i => i + 1);
-      }
-    }, 400);
-  };
-
-  // Auto-advance each line
-  useEffect(() => {
-    const dur = INTRO_LINE_DURATIONS[currentIdx] || 2000;
-    setVisible(false);
-    setVibrating(false);
-    // Short delay before appearing on new page
-    const showT = setTimeout(() => {
-      setVisible(true);
-      setVibrating(true);
-      setTimeout(() => setVibrating(false), 700);
-    }, 150);
-    const advT = setTimeout(advance, dur + 150);
-    return () => { clearTimeout(showT); clearTimeout(advT); };
-  }, [currentIdx]);
-
-  const line = INTRO_LINES[currentIdx];
-  if (!line) return null;
-
-  // Bigger base sizes for full-page display
-  const bigSize = Math.max(48, line.size * 2.2);
-  const isFinal = line.final;
-
+// ── TypewriterText ────────────────────────────────────────────────────────────
+function TypewriterText({ text, startAt, elapsed, style, showCursor }) {
+  const localT = Math.max(0, elapsed - startAt);
+  const CHAR_MS = 38;
+  const charsVisible = Math.min(text.length, Math.floor(localT / CHAR_MS));
+  const done = charsVisible >= text.length;
   return (
-    <div
-      onClick={onDone}
-      style={{
-        position: 'fixed', inset: 0, background: '#000',
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        zIndex: 2000, cursor: 'pointer',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Scan lines */}
-      <div style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none',
-        background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(79,195,247,0.015) 3px, rgba(79,195,247,0.015) 4px)',
-      }}/>
-      {/* Vignette */}
-      <div style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none',
-        background: 'radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.85) 100%)',
-      }}/>
-
-      {/* Glow pulse behind text */}
-      {line.glow && (
-        <div style={{
-          position:'absolute', width:500, height:500, borderRadius:'50%', pointerEvents:'none',
-          background: `radial-gradient(circle, ${line.glow}18, transparent 70%)`,
-          filter:'blur(60px)',
-          animation: isFinal ? 'manaGlow 1.5s ease-in-out infinite' : 'breathe 2s ease-in-out infinite',
+    <span style={style}>
+      {text.slice(0, charsVisible)}
+      {showCursor && !done && (
+        <span style={{
+          display:'inline-block', width:2, height:'1.1em',
+          background:'currentColor', marginLeft:2, verticalAlign:'middle',
+          animation:'cursorBlink 0.7s step-end infinite',
         }}/>
       )}
+    </span>
+  );
+}
 
-      {/* Progress dots */}
-      <div style={{ position:'absolute', top:28, display:'flex', gap:6, zIndex:20 }}>
-        {INTRO_LINES.map((_,i) => (
-          <div key={i} style={{
-            width: i===currentIdx ? 18 : 5, height:5, borderRadius:3,
-            background: i < currentIdx ? 'rgba(79,195,247,0.5)' : i===currentIdx ? 'var(--mana)' : 'rgba(79,195,247,0.15)',
-            transition:'transform 0.22s cubic-bezier(0.25,0.46,0.45,0.94), opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease',
-            boxShadow: i===currentIdx ? '0 0 8px var(--mana)' : 'none'
-          }}/>
-        ))}
-      </div>
+// ── CinematicIntro ────────────────────────────────────────────────────────────
+function CinematicIntro({ onDone }) {
+  const [elapsed, setElapsed] = useState(0);
+  const [flash, setFlash]     = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const startRef = useRef(Date.now());
+  const doneRef  = useRef(false);
 
-      {/* Main line — full page, big font */}
+  useEffect(() => {
+    const id = setInterval(() => {
+      const t = Date.now() - startRef.current;
+      setElapsed(t);
+      if (t >= SL_TOTAL_MS - 600 && !doneRef.current) {
+        doneRef.current = true;
+        setFlash(true);
+        setTimeout(onDone, 900);
+      }
+    }, 16);
+    return () => clearInterval(id);
+  }, [onDone]);
+
+  // Dust particles for dungeon atmosphere
+  const DUST = Array.from({ length: 18 }, (_, i) => ({
+    id: i,
+    left:  `${5 + (i * 53) % 90}%`,
+    size:  1 + (i * 7) % 3,
+    delay: `${(i * 0.37) % 3}s`,
+    dur:   `${3 + (i * 0.6) % 4}s`,
+    dx:    `${-20 + (i * 13) % 40}px`,
+  }));
+
+  // Which steps are currently visible
+  const activeSteps = SL_TIMELINE.filter(step => {
+    const stepEnd = step.startAt + step.typeMs + (step.duration || 0);
+    return elapsed >= step.startAt && elapsed < stepEnd;
+  });
+
+  // For the 'arise' step, check if we're past it for the final white-out
+  const ariseStep = SL_TIMELINE.find(s => s.type === 'arise');
+  const inArise   = ariseStep && elapsed >= ariseStep.startAt;
+
+  // Visible sys/warn boxes — keep last 3 so they stack nicely
+  const boxSteps = activeSteps.filter(s =>
+    s.type === 'sys' || s.type === 'warn'
+  ).slice(-3);
+
+  const questStep  = activeSteps.find(s => s.type === 'quest');
+  const acceptStep = activeSteps.find(s => s.type === 'accept');
+
+  // Progress bar
+  const progress = Math.min(1, elapsed / SL_TOTAL_MS);
+
+  // Colors
+  const SYS_BORDER  = 'rgba(79,195,247,0.5)';
+  const SYS_BG      = 'rgba(0,15,40,0.92)';
+  const WARN_BORDER = 'rgba(231,76,60,0.7)';
+  const WARN_BG     = 'rgba(40,0,0,0.92)';
+  const QUEST_BORDER= 'rgba(255,181,71,0.6)';
+  const QUEST_BG    = 'rgba(20,12,0,0.95)';
+
+  return (
+    <div style={{
+      position:'fixed', inset:0,
+      background:'#000',
+      display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center',
+      zIndex:2000, overflow:'hidden',
+      fontFamily:'Cinzel, serif',
+    }}>
+
+      {/* ── Dungeon atmosphere — deep red ambient light ── */}
       <div style={{
-        opacity: visible ? 1 : 0,
-        transform: visible
-          ? (vibrating ? 'scale(1)' : 'scale(1)')
-          : 'scale(0.85)',
-        animation: visible && vibrating ? 'intro-vibrate 0.65s ease-out' : (visible && isFinal ? 'manaGlow 1.5s ease-in-out infinite' : 'none'),
-        transition: !vibrating ? 'opacity 0.4s ease-out, transform 0.4s ease-out' : 'none',
-        fontFamily: 'Cinzel, serif',
-        fontSize: `clamp(36px, ${isFinal ? '15vw' : '8vw'}, ${isFinal ? 140 : bigSize}px)`,
-        fontWeight: line.bold || isFinal ? 900 : 600,
-        color: line.color,
-        letterSpacing: Math.max(line.spacing, isFinal ? 12 : 6),
-        textAlign: 'center',
-        lineHeight: 1.15,
-        padding: '0 32px',
-        textShadow: line.glow
-          ? `0 0 30px ${line.glow}, 0 0 60px ${line.glow}88, 0 0 120px ${line.glow}44`
-          : `0 2px 20px rgba(0,0,0,0.8)`,
-        position: 'relative', zIndex: 10,
-        maxWidth: '95vw',
-        wordBreak: 'break-word',
-      }}>
-        {line.text}
-      </div>
+        position:'absolute', inset:0, pointerEvents:'none',
+        background:'radial-gradient(ellipse at 50% 70%, rgba(100,0,0,0.18) 0%, transparent 65%)',
+        animation:'redPulse 4s ease-in-out infinite',
+      }}/>
 
-      {/* Skip hint */}
+      {/* Scan lines */}
       <div style={{
-        position: 'absolute', bottom: 28, fontSize: 11, color: 'rgba(79,195,247,0.35)', zIndex:20,
-        letterSpacing: 4, fontFamily: 'Cinzel, serif',
-        animation: 'breathe 2s ease-in-out infinite'
+        position:'absolute', inset:0, pointerEvents:'none',
+        background:'repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(79,195,247,0.008) 2px,rgba(79,195,247,0.008) 3px)',
+      }}/>
+
+      {/* Vignette */}
+      <div style={{
+        position:'absolute', inset:0, pointerEvents:'none',
+        background:'radial-gradient(ellipse at center, transparent 20%, rgba(0,0,0,0.96) 100%)',
+      }}/>
+
+      {/* Dust particles */}
+      {DUST.map(d => (
+        <div key={d.id} style={{
+          position:'absolute', bottom:0, left:d.left,
+          width:d.size, height:d.size, borderRadius:'50%',
+          background:'rgba(79,195,247,0.4)',
+          animation:`dustFloat ${d.dur} ${d.delay} ease-out infinite`,
+          '--dx': d.dx,
+          pointerEvents:'none',
+        }}/>
+      ))}
+
+      {/* ── System boxes — stack vertically, newest at bottom ── */}
+      <div style={{
+        position:'absolute', inset:0,
+        display:'flex', flexDirection:'column',
+        alignItems:'center', justifyContent:'center',
+        gap:10, padding:'0 24px',
       }}>
-        TAP TO SKIP
+
+        {/* Render sys/warn boxes */}
+        {boxSteps.map((step, i) => {
+          const isWarn  = step.type === 'warn';
+          const border  = isWarn ? WARN_BORDER : SYS_BORDER;
+          const bg      = isWarn ? WARN_BG     : SYS_BG;
+          const color   = isWarn ? '#FF6B6B'   : '#4FC3F7';
+          const localStart = step.startAt;
+
+          return (
+            <div key={step.startAt} style={{
+              width:'100%', maxWidth:340,
+              padding: step.small ? '8px 16px' : '12px 18px',
+              borderRadius:6,
+              border: `1px solid ${border}`,
+              background: bg,
+              boxShadow: `0 0 20px ${isWarn ? 'rgba(231,76,60,0.15)' : 'rgba(79,195,247,0.1)'}`,
+              animation:'sysBoxIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards',
+            }}>
+              {/* Header bar */}
+              <div style={{
+                fontSize:8, letterSpacing:3, color: `${color}88`,
+                marginBottom: step.small ? 0 : 6,
+                borderBottom: step.small ? 'none' : `1px solid ${color}22`,
+                paddingBottom: step.small ? 0 : 5,
+              }}>
+                {isWarn ? 'WARNING' : 'SYSTEM'}
+              </div>
+
+              <TypewriterText
+                text={step.text}
+                startAt={localStart}
+                elapsed={elapsed}
+                showCursor={i === boxSteps.length - 1}
+                style={{
+                  fontSize: step.small ? 10 : step.bold ? 16 : 13,
+                  fontWeight: step.bold ? 700 : 400,
+                  color,
+                  letterSpacing: step.bold ? 2 : 1,
+                  lineHeight: 1.5,
+                  display:'block',
+                }}
+              />
+            </div>
+          );
+        })}
+
+        {/* Quest panel */}
+        {questStep && (
+          <div style={{
+            width:'100%', maxWidth:340,
+            padding:'16px 18px',
+            borderRadius:8,
+            border:`2px solid ${QUEST_BORDER}`,
+            background: QUEST_BG,
+            animation:'sysBoxIn 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards, questGlow 2s ease-in-out infinite',
+          }}>
+            <div style={{
+              fontSize:10, letterSpacing:4, color:'#FFB547',
+              textAlign:'center', marginBottom:10,
+              borderBottom:'1px solid rgba(255,181,71,0.2)',
+              paddingBottom:8,
+            }}>
+              <TypewriterText
+                text={questStep.title}
+                startAt={questStep.startAt}
+                elapsed={elapsed}
+                showCursor={false}
+                style={{ color:'#FFB547', letterSpacing:3, fontSize:10 }}
+              />
+            </div>
+            {questStep.lines.map((line, li) => {
+              const lineStart = questStep.startAt
+                + questStep.title.length * 38
+                + 300
+                + li * (line.length * 38 + 300);
+              return (
+                <div key={li} style={{
+                  fontSize:12, color:'#e8c97a', marginBottom:4,
+                  paddingLeft:8, borderLeft:'2px solid rgba(255,181,71,0.3)',
+                }}>
+                  <TypewriterText
+                    text={`▸  ${line}`}
+                    startAt={lineStart}
+                    elapsed={elapsed}
+                    showCursor={false}
+                    style={{ color:'#e8c97a', fontSize:12 }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Accept panel */}
+        {acceptStep && (
+          <div style={{
+            display:'flex', flexDirection:'column', alignItems:'center', gap:10,
+            animation:'sysBoxIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards',
+          }}>
+            {/* Auto-accept countdown */}
+            {(() => {
+              const localT  = Math.max(0, elapsed - acceptStep.startAt);
+              const totalMs = acceptStep.typeMs + (acceptStep.duration || 3000);
+              const pct     = Math.min(100, (localT / totalMs) * 100);
+              return (
+                <div style={{
+                  padding:'12px 32px', borderRadius:6, cursor:'default',
+                  border:'2px solid rgba(0,212,255,0.6)',
+                  background:'rgba(0,20,50,0.95)',
+                  animation:'acceptPulse 1.2s ease-in-out infinite',
+                  width:200, textAlign:'center',
+                }}>
+                  <div style={{ fontSize:13, color:'#00D4FF', letterSpacing:3, marginBottom:6 }}>
+                    ACCEPT
+                  </div>
+                  {/* Countdown bar */}
+                  <div style={{ height:2, background:'rgba(0,212,255,0.15)', borderRadius:1, overflow:'hidden' }}>
+                    <div style={{
+                      height:'100%', width:`${pct}%`,
+                      background:'linear-gradient(90deg,#4FC3F7,#00D4FF)',
+                    }}/>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
-      {/* Flash overlay on finale */}
-      {phase === 'flash' && (
+      {/* ── ARISE finale ── */}
+      {inArise && (
         <div style={{
-          position: 'absolute', inset: 0, background: '#4FC3F7',
-          animation: 'flashOut 0.8s ease-out forwards',
-          pointerEvents: 'none'
+          position:'absolute', inset:0,
+          display:'flex', flexDirection:'column',
+          alignItems:'center', justifyContent:'center',
+          zIndex:25,
+          background:`rgba(0,0,0,${Math.min(0.97, (elapsed - (ariseStep?.startAt||0)) / 1000 * 0.97)})`,
+        }}>
+          {/* Blue ambient blast */}
+          <div style={{
+            position:'absolute', width:700, height:700, borderRadius:'50%',
+            background:'radial-gradient(circle, rgba(0,212,255,0.18) 0%, transparent 65%)',
+            filter:'blur(60px)',
+            animation:'manaGlow 2s ease-in-out infinite',
+          }}/>
+
+          <div style={{
+            fontSize:'clamp(52px,18vw,130px)',
+            fontWeight:900, color:'#fff',
+            letterSpacing:14,
+            textAlign:'center',
+            textShadow:'0 0 40px #00D4FF, 0 0 80px #00D4FF88, 0 0 160px #00D4FF33',
+            animation:'ariseSlam 1.2s cubic-bezier(0.16,1,0.3,1) forwards',
+            zIndex:10,
+          }}>
+            ARISE.
+          </div>
+
+          <div style={{
+            marginTop:20, fontSize:11, color:'rgba(0,212,255,0.5)',
+            letterSpacing:8, animation:'breathe 1.5s ease-in-out infinite',
+          }}>
+            PLAYER REGISTERED
+          </div>
+        </div>
+      )}
+
+      {/* Progress bar */}
+      <div style={{
+        position:'absolute', bottom:0, left:0,
+        height:2, width:'100%',
+        background:'rgba(79,195,247,0.08)', zIndex:30,
+      }}>
+        <div style={{
+          height:'100%', width:`${progress * 100}%`,
+          background:'linear-gradient(90deg,#4FC3F7,#00D4FF)',
+          boxShadow:'0 0 6px #4FC3F7',
+        }}/>
+      </div>
+
+      {/* Flash on end */}
+      {flash && (
+        <div style={{
+          position:'absolute', inset:0,
+          background:'#4FC3F7',
+          animation:'flashOut 0.9s ease-out forwards',
+          pointerEvents:'none', zIndex:40,
         }}/>
       )}
     </div>
