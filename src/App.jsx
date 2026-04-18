@@ -3572,56 +3572,138 @@ function BoostPanel({ hunter }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // XP VELOCITY SPARKLINE
 // ─────────────────────────────────────────────────────────────────────────────
-function XpVelocityChart({ xpLog }) {
-  const days = getWeekDates();
-  const data = days.map(d => {
+function XpVelocityChart({ xpLog, periodDays = 7, onPeriodChange }) {
+  const PERIODS = [
+    { label:'7D', days:7 },
+    { label:'14D', days:14 },
+    { label:'30D', days:30 },
+    { label:'90D', days:90 },
+    { label:'ALL', days:null },
+  ];
+
+  // Build date array for the period
+  const buildDates = (n) => {
+    if (n === null) {
+      // All time — use every date in xpLog
+      const allDates = (xpLog||[]).map(e => e.date).sort();
+      if (allDates.length === 0) return [];
+      const first = new Date(allDates[0] + 'T12:00:00');
+      const today = new Date();
+      const out = [];
+      for (let d = new Date(first); d <= today; d.setDate(d.getDate()+1)) {
+        out.push(d.toISOString().slice(0,10));
+      }
+      return out;
+    }
+    const out = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000);
+      out.push(d.toISOString().slice(0,10));
+    }
+    return out;
+  };
+
+  const dates = buildDates(periodDays);
+  const data = dates.map(d => {
     const e = (xpLog||[]).find(x => x.date === d);
     return { date: d, xp: e ? e.xp : 0 };
   });
-  const max = Math.max(...data.map(d => d.xp), 1);
-  const W = 280, H = 60;
-  const pts = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * (W - 20) + 10;
-    const y = H - 10 - ((d.xp / max) * (H - 20));
+
+  // For large datasets, aggregate into buckets
+  const MAX_POINTS = 30;
+  const bucketData = (() => {
+    if (data.length <= MAX_POINTS) return data;
+    const size = Math.ceil(data.length / MAX_POINTS);
+    const buckets = [];
+    for (let i = 0; i < data.length; i += size) {
+      const chunk = data.slice(i, i + size);
+      const xp = chunk.reduce((s,d) => s + d.xp, 0);
+      buckets.push({ date: chunk[0].date, xp });
+    }
+    return buckets;
+  })();
+
+  const max = Math.max(...bucketData.map(d => d.xp), 1);
+  const W = 280, H = 70;
+  const n = bucketData.length;
+  const pts = bucketData.map((d, i) => {
+    const x = n === 1 ? W/2 : (i / (n - 1)) * (W - 20) + 10;
+    const y = H - 14 - ((d.xp / max) * (H - 24));
     return { x, y, xp: d.xp, date: d.date };
   });
+
   const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const fillD = `M ${pts[0].x} ${H} ${pts.map(p => `L ${p.x} ${p.y}`).join(' ')} L ${pts[pts.length-1].x} ${H} Z`;
+  const fillD = pts.length > 1
+    ? `M ${pts[0].x} ${H-10} ${pts.map(p => `L ${p.x} ${p.y}`).join(' ')} L ${pts[pts.length-1].x} ${H-10} Z`
+    : '';
+
   const totalXP = data.reduce((s, d) => s + d.xp, 0);
-  const trend = data[6].xp >= data[0].xp ? 'up' : 'down';
+  const avgXP = data.length > 0 ? Math.round(totalXP / data.length) : 0;
+  const firstHalf = data.slice(0, Math.floor(data.length/2)).reduce((s,d) => s+d.xp, 0);
+  const secondHalf = data.slice(Math.floor(data.length/2)).reduce((s,d) => s+d.xp, 0);
+  const trend = secondHalf >= firstHalf ? 'up' : 'down';
+
+  // Label every Nth point
+  const labelStep = Math.max(1, Math.floor(bucketData.length / 7));
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8 }}>
-        <div className="cinzel" style={{ fontSize:10, color:'var(--text-dim)', letterSpacing:3 }}>7-DAY XP VELOCITY</div>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <span style={{ fontSize:10, color: trend==='up' ? '#2ECC71' : 'var(--crimson)' }}>
-            {trend==='up' ? '↑' : '↓'} TREND
-          </span>
-          <span className="cinzel" style={{ fontSize:12, color:'var(--gold)' }}>{totalXP.toLocaleString()} XP</span>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+        <div className="cinzel" style={{ fontSize:10, color:'var(--text-dim)', letterSpacing:2 }}>XP VELOCITY</div>
+        <div style={{ display:'flex', gap:4 }}>
+          {PERIODS.map(p => (
+            <button key={p.label} onClick={() => onPeriodChange && onPeriodChange(p.days)} style={{
+              padding:'2px 7px', fontSize:8, borderRadius:4, cursor:'pointer', fontFamily:'Cinzel,serif',
+              border: periodDays === p.days ? '1px solid var(--mana)' : '1px solid var(--border)',
+              background: periodDays === p.days ? 'rgba(79,195,247,0.18)' : 'transparent',
+              color: periodDays === p.days ? 'var(--mana)' : 'var(--text-dim)',
+            }}>{p.label}</button>
+          ))}
         </div>
       </div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow:'visible' }}>
-        <defs>
-          <linearGradient id="xpGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#4FC3F7" stopOpacity="0.4"/>
-            <stop offset="100%" stopColor="#4FC3F7" stopOpacity="0.02"/>
-          </linearGradient>
-        </defs>
-        <path d={fillD} fill="url(#xpGrad)"/>
-        <path d={pathD} fill="none" stroke="#4FC3F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          style={{ filter:'drop-shadow(0 0 4px #4FC3F7aa)' }}/>
-        {pts.map((p, i) => p.xp > 0 && (
-          <circle key={i} cx={p.x} cy={p.y} r="3" fill="#4FC3F7" stroke="#050508" strokeWidth="1.5"
-            style={{ filter:'drop-shadow(0 0 3px #4FC3F7)' }}/>
-        ))}
-        {/* Day labels */}
-        {pts.map((p, i) => (
-          <text key={i} x={p.x} y={H} textAnchor="middle" style={{ fontSize:7, fill:'#6a7a9a', fontFamily:'Courier New' }}>
-            {['S','M','T','W','T','F','S'][new Date(data[i].date + 'T12:00:00').getDay()]}
-          </text>
-        ))}
-      </svg>
+      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+        <span style={{ fontSize:10, color: trend==='up' ? '#2ECC71' : 'var(--crimson)' }}>
+          {trend==='up' ? '↑' : '↓'} {trend==='up'?'TRENDING UP':'TRENDING DOWN'}
+        </span>
+        <span style={{ display:'flex', gap:12 }}>
+          <span style={{ fontSize:9, color:'var(--text-dim)' }}>AVG {avgXP.toLocaleString()} XP/day</span>
+          <span className="cinzel" style={{ fontSize:11, color:'var(--gold)' }}>{totalXP.toLocaleString()} XP</span>
+        </span>
+      </div>
+      {bucketData.length > 0 ? (
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow:'visible' }}>
+          <defs>
+            <linearGradient id="xpGrad2" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#4FC3F7" stopOpacity="0.35"/>
+              <stop offset="100%" stopColor="#4FC3F7" stopOpacity="0.02"/>
+            </linearGradient>
+          </defs>
+          {fillD && <path d={fillD} fill="url(#xpGrad2)"/>}
+          {pts.length > 1 && (
+            <path d={pathD} fill="none" stroke="#4FC3F7" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ filter:'drop-shadow(0 0 3px #4FC3F7aa)' }}/>
+          )}
+          {pts.map((p, i) => p.xp > 0 && bucketData.length <= 30 && (
+            <circle key={i} cx={p.x} cy={p.y} r="2.5" fill="#4FC3F7" stroke="#050508" strokeWidth="1.5"
+              style={{ filter:'drop-shadow(0 0 3px #4FC3F7)' }}/>
+          ))}
+          {bucketData.map((d, i) => {
+            if (i % labelStep !== 0 && i !== bucketData.length-1) return null;
+            const p = pts[i];
+            const dt = new Date(d.date + 'T12:00:00');
+            const label = periodDays === 7
+              ? ['S','M','T','W','T','F','S'][dt.getDay()]
+              : `${dt.getMonth()+1}/${dt.getDate()}`;
+            return (
+              <text key={i} x={p.x} y={H} textAnchor="middle" style={{ fontSize:6, fill:'#6a7a9a', fontFamily:'Courier New' }}>
+                {label}
+              </text>
+            );
+          })}
+        </svg>
+      ) : (
+        <div style={{ textAlign:'center', padding:20, color:'var(--text-dim)', fontSize:11 }}>No XP data for this period</div>
+      )}
     </div>
   );
 }
@@ -4963,6 +5045,7 @@ function WeeklyReviewScreen({ state, dispatch, addXP, showNotif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function GrowthScreen({ state, dispatch, addXP, showNotif }) {
   const [section, setSection] = useState('overview');
+  const [chartPeriod, setChartPeriod] = useState(7);
   const sections = [
     { k:'overview', label:'OVERVIEW', emoji:'📊' },
     { k:'clone', label:'SHADOW CLONE', emoji:'👥' },
@@ -4996,7 +5079,7 @@ function GrowthScreen({ state, dispatch, addXP, showNotif }) {
             </div>
             <div className="panel" style={{ padding:16 }}>
               <div className="cinzel" style={{ fontSize:10, color:'var(--text-dim)', letterSpacing:3, marginBottom:12 }}>XP VELOCITY</div>
-              <XpVelocityChart xpLog={state.xpLog||[]}/>
+              <XpVelocityChart xpLog={state.xpLog||[]} periodDays={chartPeriod} onPeriodChange={setChartPeriod}/>
             </div>
             <div className="panel" style={{ padding:16, borderColor:'rgba(231,76,60,0.3)' }}>
               <div className="cinzel" style={{ fontSize:10, color:'var(--crimson)', letterSpacing:3, marginBottom:12 }}>⚠️ COST OF LAZINESS</div>
@@ -11842,6 +11925,8 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
       debtLedger:       cleanState.debtLedger        || [],
       entropy:          cleanState.entropy           || {},
       forbiddenZone:    cleanState.forbiddenZone     || {},
+      activeDungeonQuest:      cleanState.activeDungeonQuest      || null,
+      completedDungeonQuests:  cleanState.completedDungeonQuests  || [],
 
       // ── Human-readable summary (stripped on import) ──
       _summary: {
@@ -11867,6 +11952,8 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
     setExportText(json);
     setShowExportModal(true);
     setCopied(false);
+    // Mark today as backed up
+    try { localStorage.setItem('arise:lastBackup', new Date().toISOString().slice(0,10)); } catch(e) {}
     try {
       const blob = new Blob([json], { type:'application/json' });
       const url = URL.createObjectURL(blob);
@@ -12223,21 +12310,76 @@ function SettingsScreen({ state, dispatch, showNotif, sfx }) {
         {showImportModal && (
           <div className="modal-overlay" onClick={()=>setShowImportModal(false)}>
             <div className="modal-box" onClick={e=>e.stopPropagation()} style={{ maxHeight:'80vh', display:'flex', flexDirection:'column' }}>
-              <div className="cinzel" style={{ color:'var(--violet)', fontSize:16, marginBottom:8 }}>📥 RESTORE BACKUP</div>
-              <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:12 }}>Paste your previously exported backup text below.</div>
+              <div className="cinzel" style={{ color:'var(--violet)', fontSize:16, marginBottom:4 }}>📥 RESTORE BACKUP</div>
+              <div style={{ fontSize:11, color:'var(--text-dim)', marginBottom:14, lineHeight:1.6 }}>
+                Upload your <span style={{color:'var(--mana)'}}>NEWYOU_*.json</span> backup file, or paste the JSON text below.
+              </div>
+
+              {/* File Upload Button */}
+              <label style={{
+                display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+                padding:'14px', borderRadius:8, cursor:'pointer', marginBottom:12,
+                background:'rgba(155,89,182,0.12)', border:'2px dashed rgba(155,89,182,0.5)',
+                color:'var(--violet)', fontSize:12, fontFamily:'Cinzel,serif', letterSpacing:1,
+              }}>
+                <span style={{fontSize:20}}>📂</span>
+                <div style={{textAlign:'center'}}>
+                  <div>UPLOAD BACKUP FILE</div>
+                  <div style={{fontSize:9, color:'var(--text-dim)', marginTop:2, letterSpacing:0}}>Accepts .json files exported from this app</div>
+                </div>
+                <input type="file" accept=".json,application/json" style={{display:'none'}} onChange={(e)=>{
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    try {
+                      const text = ev.target.result;
+                      const data = JSON.parse(text);
+                      dispatch({type:'LOAD_STATE', payload:data});
+                      setShowImportModal(false);
+                      setImportText('');
+                      showNotif('✅ BACKUP RESTORED — WELCOME BACK, HUNTER');
+                      // Mark last backup date
+                      try { localStorage.setItem('arise:lastBackup', new Date().toISOString().slice(0,10)); } catch(e){}
+                    } catch(err) {
+                      showNotif('❌ INVALID BACKUP FILE');
+                    }
+                  };
+                  reader.readAsText(file);
+                  e.target.value = '';
+                }}/>
+              </label>
+
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                <div style={{flex:1, height:1, background:'rgba(255,255,255,0.08)'}}/>
+                <span style={{fontSize:9, color:'var(--text-dim)', letterSpacing:2}}>OR PASTE TEXT</span>
+                <div style={{flex:1, height:1, background:'rgba(255,255,255,0.08)'}}/>
+              </div>
+
               <textarea value={importText} onChange={e=>setImportText(e.target.value)} placeholder='Paste your backup JSON here...' style={{
-                flex:1, minHeight:200, maxHeight:280, background:'rgba(0,0,0,0.4)',
+                flex:1, minHeight:120, maxHeight:200, background:'rgba(0,0,0,0.4)',
                 border:'1px solid var(--border)', borderRadius:6, color:'var(--text)',
                 fontSize:11, padding:10, fontFamily:'monospace', resize:'none', marginBottom:12
               }}/>
               <div style={{ display:'flex', gap:8 }}>
                 <button style={{
                   flex:1, padding:'11px', borderRadius:6, cursor:'pointer',
-                  background:'rgba(155,89,182,0.15)', border:'1px solid var(--violet)',
-                  color:'var(--violet)', fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:1
+                  background: importText.trim() ? 'rgba(155,89,182,0.15)' : 'rgba(255,255,255,0.03)',
+                  border:'1px solid var(--violet)',
+                  color: importText.trim() ? 'var(--violet)' : 'var(--text-dim)',
+                  fontFamily:'Cinzel,serif', fontSize:12, letterSpacing:1,
+                  opacity: importText.trim() ? 1 : 0.5,
                 }} onClick={()=>{
-                  try { const data=JSON.parse(importText.trim()); dispatch({type:'LOAD_STATE',payload:data}); setShowImportModal(false); setImportText(''); showNotif('✅ PROGRESS RESTORED'); } catch(e){ showNotif('❌ INVALID DATA'); }
-                }}>✅ RESTORE</button>
+                  if (!importText.trim()) return;
+                  try {
+                    const data=JSON.parse(importText.trim());
+                    dispatch({type:'LOAD_STATE',payload:data});
+                    setShowImportModal(false);
+                    setImportText('');
+                    showNotif('✅ PROGRESS RESTORED');
+                    try { localStorage.setItem('arise:lastBackup', new Date().toISOString().slice(0,10)); } catch(e){}
+                  } catch(e){ showNotif('❌ INVALID DATA — check the text and try again'); }
+                }}>✅ RESTORE FROM TEXT</button>
                 <button className="btn-danger" style={{ flex:1 }} onClick={()=>setShowImportModal(false)}>CANCEL</button>
               </div>
             </div>
@@ -13075,9 +13217,112 @@ function StreakDeathTimer({ deadline }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WELCOME GATE — shown on first launch to distinguish new vs returning hunter
+// ─────────────────────────────────────────────────────────────────────────────
+function WelcomeGate({ onNew, onRestore }) {
+  const [dragOver, setDragOver] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
+  const [restoring, setRestoring] = useState(false);
+
+  const handleFile = (file) => {
+    if (!file) return;
+    setRestoring(true);
+    setRestoreError('');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        try { localStorage.setItem('arise:lastBackup', new Date().toISOString().slice(0,10)); } catch(e){}
+        onRestore(data);
+      } catch(err) {
+        setRestoreError('❌ Invalid file — make sure you upload a NEWYOU backup .json');
+        setRestoring(false);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div style={{
+      position:'fixed', inset:0,
+      background:'#04040D',
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+      fontFamily:'Cinzel, serif', padding:24, zIndex:2000,
+    }}>
+      {/* Ambient orbs */}
+      <div style={{ position:'absolute', top:'-10%', left:'10%', width:340, height:340, borderRadius:'50%',
+        background:'radial-gradient(circle, rgba(0,212,255,0.07), transparent 65%)', filter:'blur(60px)', pointerEvents:'none' }}/>
+      <div style={{ position:'absolute', bottom:'-10%', right:'5%', width:300, height:300, borderRadius:'50%',
+        background:'radial-gradient(circle, rgba(139,111,255,0.07), transparent 65%)', filter:'blur(60px)', pointerEvents:'none' }}/>
+
+      <div style={{ textAlign:'center', maxWidth:360, width:'100%', position:'relative', zIndex:1 }}>
+        {/* Logo */}
+        <div style={{ fontSize:44, marginBottom:8 }}>⚡</div>
+        <div className="cinzel" style={{ fontSize:28, fontWeight:900, color:'var(--mana)', letterSpacing:6, marginBottom:4,
+          textShadow:'0 0 30px rgba(0,212,255,0.5)' }}>NEW YOU</div>
+        <div style={{ fontSize:10, color:'rgba(0,212,255,0.5)', letterSpacing:8, marginBottom:32 }}>SHADOW SYSTEM</div>
+
+        {/* New Hunter */}
+        <button onClick={onNew} style={{
+          width:'100%', padding:'18px 20px', borderRadius:12, cursor:'pointer', marginBottom:14,
+          background:'linear-gradient(135deg, rgba(0,212,255,0.14), rgba(0,212,255,0.04))',
+          border:'2px solid rgba(0,212,255,0.5)',
+          color:'var(--mana)', fontFamily:'Cinzel,serif', fontSize:14, letterSpacing:2,
+          boxShadow:'0 0 24px rgba(0,212,255,0.12)',
+          transition:'all 0.2s',
+        }}
+          onMouseEnter={e=>{ e.currentTarget.style.background='rgba(0,212,255,0.18)'; e.currentTarget.style.boxShadow='0 0 32px rgba(0,212,255,0.28)'; }}
+          onMouseLeave={e=>{ e.currentTarget.style.background='linear-gradient(135deg, rgba(0,212,255,0.14), rgba(0,212,255,0.04))'; e.currentTarget.style.boxShadow='0 0 24px rgba(0,212,255,0.12)'; }}
+        >
+          <div style={{ fontSize:22, marginBottom:4 }}>⚔️</div>
+          <div style={{ fontSize:14, letterSpacing:2 }}>I AM A NEW HUNTER</div>
+          <div style={{ fontSize:10, color:'rgba(0,212,255,0.6)', marginTop:4, letterSpacing:1 }}>Begin your journey from zero</div>
+        </button>
+
+        {/* Returning Hunter — file upload */}
+        <label
+          onDragOver={e=>{ e.preventDefault(); setDragOver(true); }}
+          onDragLeave={()=>setDragOver(false)}
+          onDrop={e=>{ e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
+          style={{
+            display:'block', width:'100%', padding:'18px 20px', borderRadius:12, cursor:'pointer',
+            background: dragOver ? 'rgba(139,111,255,0.2)' : 'linear-gradient(135deg, rgba(139,111,255,0.12), rgba(139,111,255,0.04))',
+            border: dragOver ? '2px solid rgba(139,111,255,0.8)' : '2px dashed rgba(139,111,255,0.45)',
+            color:'var(--violet)', fontFamily:'Cinzel,serif', textAlign:'center',
+            boxShadow:'0 0 20px rgba(139,111,255,0.08)',
+            transition:'all 0.2s',
+          }}
+        >
+          <input type="file" accept=".json,application/json" style={{display:'none'}} onChange={e=>handleFile(e.target.files?.[0])}/>
+          <div style={{ fontSize:22, marginBottom:4 }}>{restoring ? '⏳' : '📂'}</div>
+          <div style={{ fontSize:14, letterSpacing:2 }}>{restoring ? 'RESTORING...' : 'RETURNING HUNTER'}</div>
+          <div style={{ fontSize:10, color:'rgba(139,111,255,0.65)', marginTop:4, letterSpacing:0.5 }}>
+            {dragOver ? 'Drop your backup file here!' : 'Tap to upload your NEWYOU backup file (.json)'}
+          </div>
+          <div style={{ fontSize:9, color:'rgba(139,111,255,0.45)', marginTop:2 }}>or drag & drop here</div>
+        </label>
+
+        {restoreError && (
+          <div style={{ marginTop:12, padding:'10px 14px', borderRadius:8, background:'rgba(231,76,60,0.1)',
+            border:'1px solid rgba(231,76,60,0.4)', fontSize:11, color:'var(--crimson)' }}>
+            {restoreError}
+          </div>
+        )}
+
+        <div style={{ marginTop:24, fontSize:10, color:'rgba(255,255,255,0.2)', lineHeight:1.7, letterSpacing:0.5 }}>
+          Your progress is stored locally on this device.<br/>
+          Export a backup daily to keep your data safe.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, null, buildInitialState);
   const [loaded, setLoaded] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false); // shown before onboarding for new/returning choice
   const [tab, setTab] = useState('status');
   const [floats, setFloats] = useState([]);
   const [levelUpData, setLevelUpData] = useState(null);
@@ -13098,6 +13343,9 @@ export default function App() {
         dispatch({ type:'LOAD_STATE', payload:saved });
         // Restore theme
         if (saved.theme === 'light') document.body.className = 'light-theme';
+      } else {
+        // No saved state — show the welcome gate (new vs returning)
+        setShowWelcome(true);
       }
       setLoaded(true);
     });
@@ -13134,6 +13382,21 @@ export default function App() {
       setTimeout(() => setShowBoot(false), 2200);
     }
   }, [loaded]);
+
+  // ── DAILY BACKUP REMINDER ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!loaded || !state.onboarded) return;
+    const today = new Date().toISOString().slice(0,10);
+    let lastBackup = null;
+    try { lastBackup = localStorage.getItem('arise:lastBackup'); } catch(e) {}
+    // Show reminder if never backed up OR last backup wasn't today
+    if (lastBackup !== today) {
+      const t = setTimeout(() => {
+        showNotif('💾 BACKUP REMINDER — Export your data daily to keep your progress safe! (Settings → Data)');
+      }, 5000); // 5 seconds after boot
+      return () => clearTimeout(t);
+    }
+  }, [loaded, state.onboarded]);
 
   // Morning check-in trigger — show on first open after midnight reset
   useEffect(() => {
@@ -13814,6 +14077,23 @@ export default function App() {
       <div style={{ position:'fixed', inset:0, background:'#000', display:'flex', alignItems:'center', justifyContent:'center' }}>
         <div className="cinzel" style={{ color:'var(--mana)', letterSpacing:6, animation:'breathe 1.5s ease-in-out infinite' }}>LOADING...</div>
       </div>
+    );
+  }
+
+  // Welcome gate — shown when there is zero saved data (brand new device/browser)
+  if (showWelcome) {
+    return (
+      <>
+        <style>{STYLES}</style>
+        <WelcomeGate
+          onNew={() => setShowWelcome(false)}
+          onRestore={(data) => {
+            dispatch({ type:'LOAD_STATE', payload:data });
+            if (data.theme === 'light') document.body.className = 'light-theme';
+            setShowWelcome(false);
+          }}
+        />
+      </>
     );
   }
 
